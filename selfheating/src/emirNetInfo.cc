@@ -1,4 +1,4 @@
-#include "selfheating/emirnetinfo.h"
+#include "selfheating/emirNetInfo.h"
 #include <cstdarg>
 #include <cstdio>
 

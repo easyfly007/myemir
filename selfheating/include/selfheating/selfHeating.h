@@ -22,7 +22,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "selfheating/emirnetinfo.h"
+#include "selfheating/emirNetInfo.h"
 
 // =============================================================================
 // SelfHeatingDevStr — compact MOSFET storage (32 bytes)
