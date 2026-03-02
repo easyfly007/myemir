@@ -84,7 +84,7 @@ selfheating/
 
 ### 计算步骤
 
-1. **`devMgr.init(mosfets)`**：从外部 manager 拷贝 MOSFET 到紧凑结构 + 建 Uniform Grid 空间索引
+1. **`devMgr.init(mosfets, bbox_llx, bbox_lly, bbox_urx, bbox_ury)`**：从外部 manager 拷贝 MOSFET 到紧凑结构 + 建 Uniform Grid 空间索引
 2. **`devMgr.build(deviceLayerParams)`**：计算每个 device 的 deltaT
 3. **Per-net 处理**：对每个 net 临时构造 `SelfHeatingMgr`，内部建 via 连接集合 + 计算所有 wire res 的 deltaT，结果写入 `ResEmParam._deltaT`
 4. **EM check**（已有流程）：读 `ResEmParam` 做 EM 计算，自动拿到新的 deltaT
@@ -102,8 +102,9 @@ selfheating/
 // =============================================
 // Phase 1: 建立 device 数据 + 空间索引
 // =============================================
-SelfHeatingDevMgr devMgr;
-devMgr.init(mosfets);    // 拷贝到 SelfHeatingDevStr + 建 Uniform Grid
+SelfHeatingDevMgr devMgr(debug);  // debug: 0=off, >=1=grid stats
+devMgr.init(mosfets, bbox_llx, bbox_lly, bbox_urx, bbox_ury);
+// bbox 从 EmirInfoMgr 获取，拷贝到 SelfHeatingDevStr + 建动态分辨率 Uniform Grid
 
 // =============================================
 // Phase 2: 计算每个 device 的 deltaT
@@ -283,11 +284,13 @@ struct SelfHeatingMosfet {
 ```cpp
 class SelfHeatingDevMgr {
 public:
-    SelfHeatingDevMgr();
+    SelfHeatingDevMgr(int debug = 0);  // debug: 0=off, >=1=grid stats
     ~SelfHeatingDevMgr();
 
-    // Phase 1: 拷贝外部 MOSFET 数据 + 建 Uniform Grid 空间索引
-    void init(const std::vector<SelfHeatingMosfet>& mosfets);
+    // Phase 1: 拷贝外部 MOSFET 数据 + 建动态分辨率 Uniform Grid 空间索引
+    // bbox 由上层从 EmirInfoMgr 获取后传入
+    void init(const std::vector<SelfHeatingMosfet>& mosfets,
+              float bbox_llx, float bbox_lly, float bbox_urx, float bbox_ury);
 
     // Phase 2: 用 device layer 参数计算每个 device 的 deltaT
     void build(const std::map<std::string, DeviceLayerParams>& device_layers);
@@ -309,6 +312,8 @@ public:
 
 ```cpp
 private:
+    int _debug;                                            // debug level
+
     // Device 存储
     std::vector<SelfHeatingDevStr> _devices;
 
@@ -334,40 +339,34 @@ private:
 #### init 实现逻辑
 
 ```cpp
-void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
+void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
+                             float bbox_llx, float bbox_lly,
+                             float bbox_urx, float bbox_ury) {
     // 1. 拷贝数据到 _devices
     _devices.resize(mosfets.size());
     for (size_t i = 0; i < mosfets.size(); ++i) {
         SelfHeatingDevStr& d = _devices[i];
         d.llx = mosfets[i].llx;
-        d.lly = mosfets[i].lly;
-        d.urx = mosfets[i].urx;
-        d.ury = mosfets[i].ury;
-        d.power = mosfets[i].power;
-        d.deltaT = 0.0f;
-        d.finger_num = mosfets[i].finger_num;
-        d.fin_num = mosfets[i].fin_num;
+        // ... 其他字段 ...
         d.layer_id = _getOrCreateLayerId(mosfets[i].layer_name);
-        d._pad = 0;
     }
 
-    // 2. 计算版图范围
-    float min_x = _devices[0].llx, min_y = _devices[0].lly;
-    float max_x = _devices[0].urx, max_y = _devices[0].ury;
-    for (size_t i = 1; i < _devices.size(); ++i) {
-        if (_devices[i].llx < min_x) min_x = _devices[i].llx;
-        if (_devices[i].lly < min_y) min_y = _devices[i].lly;
-        if (_devices[i].urx > max_x) max_x = _devices[i].urx;
-        if (_devices[i].ury > max_y) max_y = _devices[i].ury;
-    }
-    _originX = min_x;
-    _originY = min_y;
+    // 2. 使用调用方传入的 bbox（来自 EmirInfoMgr）
+    _originX = bbox_llx;
+    _originY = bbox_lly;
 
-    // 3. 确定 grid 参数（~1000x1000）
-    float width = max_x - min_x;
-    float height = max_y - min_y;
-    _cellSize = width / 1000.0f;
-    if (height / 1000.0f > _cellSize) _cellSize = height / 1000.0f;
+    // 3. 动态 grid 分辨率，目标 ~8 dev/cell
+    float width = bbox_urx - bbox_llx;
+    float height = bbox_ury - bbox_lly;
+    float area = width * height;
+
+    int num_devices = (int)_devices.size();
+    int target_avg = 8;
+    int target_cells = num_devices / target_avg;
+    if (target_cells < 100) target_cells = 100;           // 下限 ~10x10
+    if (target_cells > 25000000) target_cells = 25000000;  // 上限 ~5000x5000
+
+    _cellSize = (float)sqrt((double)area / target_cells);
     if (_cellSize <= 0.0f) _cellSize = 1.0f;
 
     _nx = (int)((width / _cellSize) + 1);
@@ -376,43 +375,7 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
     // 4. 建 CSR grid（两遍扫描）
     //    Pass 1: 统计每个 cell 收到多少 device index → 转为 prefix sum 得到 _gridOffsets
     //    Pass 2: 再遍历所有 device，用 write cursor 写入 _gridData
-    int numCells = _nx * _ny;
-    _gridOffsets.assign(numCells + 1, 0);
-
-    // Pass 1: count
-    for (int i = 0; i < (int)_devices.size(); ++i) {
-        // ... 计算 gx0/gy0/gx1/gy1 + clamp（同前）...
-        for (int gy = gy0; gy <= gy1; ++gy)
-            for (int gx = gx0; gx <= gx1; ++gx)
-                ++_gridOffsets[_cellIndex(gx, gy)];
-    }
-
-    // 转为 prefix sum
-    { int running = 0;
-      for (int c = 0; c < numCells; ++c) {
-          int count = _gridOffsets[c];
-          _gridOffsets[c] = running;
-          running += count;
-      }
-      _gridOffsets[numCells] = running;
-    }
-
-    _gridData.resize(_gridOffsets[numCells]);
-
-    // Pass 2: fill（用 _gridOffsets 作为 write cursor）
-    for (int i = 0; i < (int)_devices.size(); ++i) {
-        // ... 计算 gx0/gy0/gx1/gy1 + clamp（同前）...
-        for (int gy = gy0; gy <= gy1; ++gy)
-            for (int gx = gx0; gx <= gx1; ++gx) {
-                int ci = _cellIndex(gx, gy);
-                _gridData[_gridOffsets[ci]++] = i;
-            }
-    }
-
-    // 右移 _gridOffsets 恢复原始 prefix sum
-    for (int c = numCells; c > 0; --c)
-        _gridOffsets[c] = _gridOffsets[c - 1];
-    _gridOffsets[0] = 0;
+    // ... (同前) ...
 }
 ```
 
@@ -491,9 +454,10 @@ void SelfHeatingDevMgr::queryOverlap(
 3. `queryOverlap` 时算出查询 bbox 覆盖哪些 grid cell，只检查这些 cell 里的 MOSFET
 
 **关键参数**：
-- cell 总数限制在 ~100 万（如 1000×1000）
-- `cell_size = max(版图宽/1000, 版图高/1000)`
-- 版图范围从 SelfHeatingDevStr 的 bbox 自动推算
+- 动态分辨率，目标 ~8 dev/cell 平均密度
+- `target_cells = clamp(num_devices / 8, 100, 25000000)` → 下限 ~10×10，上限 ~5000×5000
+- `cell_size = sqrt(area / target_cells)`
+- 版图范围（bbox）由上层 EmirInfoMgr 传入，避免 O(N) 遍历
 
 **内存**（CSR 格式）：
 - `_gridData`：~50M × 4B = ~200 MB（所有 cell 的 device 索引连续存放）
@@ -793,10 +757,10 @@ T_new = T_ambient + deltaT_total
   - 已改为 `std::vector<bool> _isConnected`，下标 = res 在 net 中的 offset，O(1) 查找
   - 同时消除了 set 树节点的堆分配和内存开销
 
-- [ ] **Uniform Grid 密度不足导致扫描过多 candidate**
-  - 位置：`selfHeating.cc:86-91`
-  - 问题：固定 1000×1000 grid（100 万 cell），5000 万 device → 平均 50 dev/cell。实际芯片 device 分布不均，热点 cell 可能有数千个 device。每次 queryOverlap 线性扫描 cell 内所有 device，预计 2.5 亿 query × 50 candidate = **125 亿次** bbox 比较
-  - 方案：动态调整 grid 分辨率使平均 ~5-10 dev/cell。如 5000 万 device 用 3000×3000 grid（900 万 cell，平均 ~5.5 dev/cell），扫描量降低约 10 倍
+- [x] **~~Uniform Grid 密度不足导致扫描过多 candidate~~**（已完成）
+  - 已改为动态 grid 分辨率，目标 ~8 dev/cell：`target_cells = clamp(N/8, 100, 25M)`
+  - bbox 由上层传入（从 EmirInfoMgr），移除 O(N) 遍历
+  - debug>=1 时输出 grid 统计信息（nx/ny/cellSize/内存等）
 
 #### P2 — 有改善空间
 
@@ -862,7 +826,7 @@ T_new = T_ambient + deltaT_total
 | ~~P0~~ | ~~CPU~~ | ~~compute() 内 wire res 串行~~ | ~~已修复：mtmq RD 模式并行~~ |
 | ~~P1~~ | ~~CPU~~ | ~~queryOverlap sort+unique~~ | ~~已修复：bitmap 去重替代 sort+unique~~ |
 | ~~P1~~ | ~~CPU~~ | ~~`_connectedRes` 用 std::set~~ | ~~已修复：改为 vector\<bool\>~~ |
-| P1 | CPU | grid 平均 50 dev/cell | 125 亿次 bbox 比较 |
+| ~~P1~~ | ~~CPU~~ | ~~grid 平均 50 dev/cell~~ | ~~已修复：动态分辨率 ~8 dev/cell~~ |
 | P2 | CPU | metal_layers string map | 7.5 亿次 string 比较 |
 | P2 | CPU | buildViaConn set 操作 | 10 亿次 O(log N) + 堆分配 |
 | P0 | 内存 | init() 峰值（非本模块可修复） | ~5 GB（上层接口决定） |

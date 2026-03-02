@@ -98,7 +98,7 @@ struct SelfHeatingParams {
 // SelfHeatingDevMgr — MOSFET manager with Uniform Grid spatial index
 //
 // Manages all MOSFET device data and provides fast bbox overlap queries
-// via an internal Uniform Grid (~1000x1000 cells).
+// via an internal Uniform Grid with dynamic resolution (~8 dev/cell avg).
 //
 // Two-phase usage:
 //   init()  - copy data from external manager + build grid
@@ -108,11 +108,13 @@ struct SelfHeatingParams {
 
 class SelfHeatingDevMgr {
 public:
-    SelfHeatingDevMgr();
+    SelfHeatingDevMgr(int debug = 0);
     ~SelfHeatingDevMgr();
 
-    // Phase 1: copy external MOSFET data + build Uniform Grid spatial index
-    void init(const std::vector<SelfHeatingMosfet>& mosfets);
+    // Phase 1: copy external MOSFET data + build Uniform Grid spatial index.
+    // bbox is the layout bounding box (from EmirInfoMgr), used to size the grid.
+    void init(const std::vector<SelfHeatingMosfet>& mosfets,
+              float bbox_llx, float bbox_lly, float bbox_urx, float bbox_ury);
 
     // Phase 2: compute each device's deltaT using device layer params
     // Formula: deltaT = power * Rth / finger_effect / fin_effect
@@ -135,6 +137,8 @@ public:
     const std::string& layerName(short layer_id) const;
 
 private:
+    int _debug;                                  // debug level: 0=off, >=1=grid stats
+
     std::vector<SelfHeatingDevStr> _devices;    // all devices, compact storage
 
     std::vector<std::string> _layerNames;       // layer_id -> layer name

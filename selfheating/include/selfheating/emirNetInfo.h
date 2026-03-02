@@ -103,6 +103,28 @@ private:
 };
 
 // =============================================================================
+// EmirInfoMgr — manages all nets, holds global layout bbox
+// =============================================================================
+
+class EmirInfoMgr {
+public:
+    EmirInfoMgr();
+
+    // global layout bounding box
+    float llx() const;
+    float lly() const;
+    float urx() const;
+    float ury() const;
+    void setBBox(float llx, float lly, float urx, float ury);
+
+    // debug output (fprintf-style, prints to stderr)
+    void debug(const char* fmt, ...) const;
+
+private:
+    float _llx, _lly, _urx, _ury;
+};
+
+// =============================================================================
 // EmirNetInfo
 // =============================================================================
 
@@ -116,14 +138,16 @@ public:
     std::vector<ResEmParam>& resEmParams();
     const std::vector<ResEmParam>& resEmParams() const;
 
+    // parent manager
+    EmirInfoMgr* mgr() const;
+    void setMgr(EmirInfoMgr* m);
+
     // building helpers
     void addNode(EmirNodeInfo* n);
     void addRes(EmirResInfo* r);
 
-    // debug output (fprintf-style, prints to stderr)
-    void debug(const char* fmt, ...) const;
-
 private:
+    EmirInfoMgr* _mgr;
     std::vector<EmirNodeInfo*> _nodes;
     std::vector<EmirResInfo*> _reses;
     std::vector<ResEmParam> _resEmParams;  // same offset as _reses

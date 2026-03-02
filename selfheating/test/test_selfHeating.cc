@@ -55,7 +55,7 @@ static void testDevMgrInit() {
     mosfets[2].layer_name = "POLY";
 
     SelfHeatingDevMgr mgr;
-    mgr.init(mosfets);
+    mgr.init(mosfets, 0, 0, 60, 60);
 
     CHECK(mgr.deviceCount() == 3);
     CHECK_NEAR(mgr.getDevice(0).power, 0.5f, 1e-6);
@@ -82,7 +82,7 @@ static void testDevMgrBuild() {
     mosfets[0].layer_name = "OD";
 
     SelfHeatingDevMgr mgr;
-    mgr.init(mosfets);
+    mgr.init(mosfets, 0, 0, 10, 10);
 
     std::map<std::string, DeviceLayerParams> dlp;
     DeviceLayerParams od;
@@ -115,7 +115,7 @@ static void testDevMgrBuildUnknownLayer() {
     mosfets[0].layer_name = "UNKNOWN";
 
     SelfHeatingDevMgr mgr;
-    mgr.init(mosfets);
+    mgr.init(mosfets, 0, 0, 10, 10);
 
     std::map<std::string, DeviceLayerParams> dlp;
     mgr.build(dlp);
@@ -146,7 +146,7 @@ static void testDevMgrQueryOverlap() {
     mosfets[2].layer_name = "OD";
 
     SelfHeatingDevMgr mgr;
-    mgr.init(mosfets);
+    mgr.init(mosfets, 0, 0, 110, 110);
 
     std::vector<int> results;
     std::vector<bool> visited(mgr.deviceCount(), false);
@@ -211,7 +211,9 @@ static void testMgrBuildViaConn() {
     wire_res_1.setAvgPower(0.01f);
     wire_res_1.setRmsPower(0.02f);
 
+    EmirInfoMgr infoMgr;
     EmirNetInfo net;
+    net.setMgr(&infoMgr);
     net.addNode(&node_inst);
     net.addNode(&node_mid);
     net.addNode(&node_end);
@@ -248,7 +250,7 @@ static void testMgrComputeEndToEnd() {
     mosfets[0].layer_name = "OD";
 
     SelfHeatingDevMgr devMgr;
-    devMgr.init(mosfets);
+    devMgr.init(mosfets, 0, 0, 10, 10);
 
     std::map<std::string, DeviceLayerParams> dlp;
     DeviceLayerParams od;
@@ -318,7 +320,9 @@ static void testMgrComputeEndToEnd() {
     wire_res_noconn.setAvgPower(avg_power);
     wire_res_noconn.setRmsPower(rms_power);
 
+    EmirInfoMgr infoMgr;
     EmirNetInfo net;
+    net.setMgr(&infoMgr);
     net.addNode(&node_inst);
     net.addNode(&node_mid);
     net.addNode(&node_end);
@@ -388,7 +392,7 @@ static void testMgrComputePartialOverlap() {
     mosfets[0].layer_name = "OD";
 
     SelfHeatingDevMgr devMgr;
-    devMgr.init(mosfets);
+    devMgr.init(mosfets, 0, 0, 20, 10);
 
     std::map<std::string, DeviceLayerParams> dlp;
     DeviceLayerParams od;
@@ -433,7 +437,9 @@ static void testMgrComputePartialOverlap() {
     wire_res.setAvgPower(avg_power);
     wire_res.setRmsPower(rms_power);
 
+    EmirInfoMgr infoMgr;
     EmirNetInfo net;
+    net.setMgr(&infoMgr);
     net.addNode(&n1);
     net.addNode(&n2);
     net.addRes(&wire_res);
@@ -475,7 +481,7 @@ static void testEmptyInput() {
     // Empty mosfets
     std::vector<SelfHeatingMosfet> mosfets;
     SelfHeatingDevMgr devMgr;
-    devMgr.init(mosfets);
+    devMgr.init(mosfets, 0, 0, 100, 100);
     CHECK(devMgr.deviceCount() == 0);
 
     std::vector<int> results;
@@ -484,7 +490,9 @@ static void testEmptyInput() {
     CHECK(results.size() == 0);
 
     // Empty net
+    EmirInfoMgr infoMgr;
     EmirNetInfo net;
+    net.setMgr(&infoMgr);
     SelfHeatingMgr mgr(&net);
     mgr.buildViaConn();
 
@@ -506,7 +514,7 @@ static void testMissingMetalLayer() {
     mosfets[0].layer_name = "OD";
 
     SelfHeatingDevMgr devMgr;
-    devMgr.init(mosfets);
+    devMgr.init(mosfets, 0, 0, 10, 10);
 
     std::map<std::string, DeviceLayerParams> dlp;
     DeviceLayerParams od;
@@ -537,7 +545,9 @@ static void testMissingMetalLayer() {
     wire_res.setAvgPower(0.01f);
     wire_res.setRmsPower(0.02f);
 
+    EmirInfoMgr infoMgr;
     EmirNetInfo net;
+    net.setMgr(&infoMgr);
     net.addNode(&n1);
     net.addNode(&n2);
     net.addRes(&wire_res);
@@ -566,7 +576,7 @@ static void testMgrComputeMultiThread() {
     mosfets[0].layer_name = "OD";
 
     SelfHeatingDevMgr devMgr;
-    devMgr.init(mosfets);
+    devMgr.init(mosfets, 0, 0, 10, 10);
 
     std::map<std::string, DeviceLayerParams> dlp;
     DeviceLayerParams od;

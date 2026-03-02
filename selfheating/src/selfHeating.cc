@@ -21,8 +21,8 @@
 // SelfHeatingDevMgr
 // =============================================================================
 
-SelfHeatingDevMgr::SelfHeatingDevMgr()
-    : _originX(0.0f), _originY(0.0f), _cellSize(1.0f), _nx(0), _ny(0)
+SelfHeatingDevMgr::SelfHeatingDevMgr(int debug)
+    : _debug(debug), _originX(0.0f), _originY(0.0f), _cellSize(1.0f), _nx(0), _ny(0)
 {}
 
 SelfHeatingDevMgr::~SelfHeatingDevMgr()
@@ -51,10 +51,12 @@ int SelfHeatingDevMgr::_cellIndex(int gx, int gy) const {
 //
 // Steps:
 //   1. Copy each SelfHeatingMosfet to SelfHeatingDevStr (32 bytes each)
-//   2. Compute the overall layout bounding box from all device bboxes
-//   3. Determine grid cell size targeting ~1000x1000 cells
+//   2. Use caller-provided bbox (from EmirInfoMgr) as grid origin/extent
+//   3. Dynamically determine grid resolution targeting ~8 dev/cell avg
 //   4. Insert each device into all grid cells its bbox covers
-void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
+void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
+                             float bbox_llx, float bbox_lly,
+                             float bbox_urx, float bbox_ury) {
     if (mosfets.empty()) return;
 
     // Step 1: Copy data to compact _devices vector
@@ -73,23 +75,22 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
         d._pad = 0;
     }
 
-    // Step 2: Compute layout bounding box from all devices
-    float min_x = _devices[0].llx, min_y = _devices[0].lly;
-    float max_x = _devices[0].urx, max_y = _devices[0].ury;
-    for (size_t i = 1; i < _devices.size(); ++i) {
-        if (_devices[i].llx < min_x) min_x = _devices[i].llx;
-        if (_devices[i].lly < min_y) min_y = _devices[i].lly;
-        if (_devices[i].urx > max_x) max_x = _devices[i].urx;
-        if (_devices[i].ury > max_y) max_y = _devices[i].ury;
-    }
-    _originX = min_x;
-    _originY = min_y;
+    // Step 2: Use caller-provided bbox as grid origin/extent
+    _originX = bbox_llx;
+    _originY = bbox_lly;
 
-    // Step 3: Determine grid cell size, targeting ~1000x1000 cells
-    float width = max_x - min_x;
-    float height = max_y - min_y;
-    _cellSize = width / 1000.0f;
-    if (height / 1000.0f > _cellSize) _cellSize = height / 1000.0f;
+    // Step 3: Dynamic grid resolution targeting ~8 devices per cell
+    float width = bbox_urx - bbox_llx;
+    float height = bbox_ury - bbox_lly;
+    float area = width * height;
+
+    int num_devices = (int)_devices.size();
+    int target_avg = 8;
+    int target_cells = num_devices / target_avg;
+    if (target_cells < 100) target_cells = 100;           // floor ~10x10
+    if (target_cells > 25000000) target_cells = 25000000;  // cap ~5000x5000
+
+    _cellSize = (float)sqrt((double)area / target_cells);
     if (_cellSize <= 0.0f) _cellSize = 1.0f;
 
     _nx = (int)((width / _cellSize) + 1);
@@ -177,6 +178,30 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
         _gridOffsets[c] = _gridOffsets[c - 1];
     }
     _gridOffsets[0] = 0;
+
+    // Debug output: grid statistics
+    if (_debug >= 1) {
+        int totalEntries = _gridOffsets[numCells];
+        double avgDevPerCell = (numCells > 0)
+            ? (double)totalEntries / numCells : 0.0;
+        // Memory: _devices (32B each) + _gridData (4B each) + _gridOffsets (4B each)
+        double memDevices = (double)_devices.size() * 32.0;
+        double memGridData = (double)_gridData.size() * 4.0;
+        double memGridOffsets = (double)_gridOffsets.size() * 4.0;
+        double memTotal = memDevices + memGridData + memGridOffsets;
+
+        fprintf(stderr, "[SH DevMgr] devices=%d  bbox=(%.4f,%.4f)-(%.4f,%.4f)\n",
+                num_devices, bbox_llx, bbox_lly, bbox_urx, bbox_ury);
+        fprintf(stderr, "[SH DevMgr] grid: nx=%d ny=%d cellSize=%.4f numCells=%d\n",
+                _nx, _ny, _cellSize, numCells);
+        fprintf(stderr, "[SH DevMgr] avg dev/cell=%.2f  gridData entries=%d\n",
+                avgDevPerCell, totalEntries);
+        fprintf(stderr, "[SH DevMgr] memory: devices=%.1fMB gridData=%.1fMB gridOffsets=%.1fMB total=%.1fMB\n",
+                memDevices / (1024.0 * 1024.0),
+                memGridData / (1024.0 * 1024.0),
+                memGridOffsets / (1024.0 * 1024.0),
+                memTotal / (1024.0 * 1024.0));
+    }
 }
 
 // Phase 2: Compute deltaT for each device.
@@ -373,7 +398,7 @@ static void computeRange(
         if (res_area <= 0.0) continue;
 
         if (debug >= 2) {
-            net->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
+            net->mgr()->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
                        r, wire_layer.c_str(),
                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
         }
@@ -403,7 +428,7 @@ static void computeRange(
 
             double contribution = overlap_ratio * alpha * beta * dev.deltaT;
             if (debug >= 2) {
-                net->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
+                net->mgr()->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
                            overlap[j], overlap_ratio, alpha, beta, contribution);
             }
 
@@ -414,7 +439,7 @@ static void computeRange(
         emParams[r]._deltaT = (float)deltaT_total;
 
         if (debug >= 1) {
-            net->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
+            net->mgr()->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
                        r, deltaT_self, deltaT_feol, deltaT_total);
         }
     }
