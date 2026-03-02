@@ -1,0 +1,572 @@
+#include "selfheating/selfHeating.h"
+
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
+#include <cassert>
+
+// =============================================================================
+// Test helpers
+// =============================================================================
+
+static int g_testsPassed = 0;
+static int g_testsFailed = 0;
+
+static void check(bool cond, const char* msg, int line) {
+    if (cond) {
+        ++g_testsPassed;
+    } else {
+        ++g_testsFailed;
+        fprintf(stderr, "FAIL (line %d): %s\n", line, msg);
+    }
+}
+
+#define CHECK(cond) check((cond), #cond, __LINE__)
+#define CHECK_NEAR(a, b, eps) check(fabs((a)-(b)) < (eps), #a " ~= " #b, __LINE__)
+
+// dummy effect functions for testing
+static double testFingerEffect(int finger_num) {
+    return 2.0 * (1.0 - exp(-0.3 * finger_num));
+}
+
+static double testFinEffect(int fin_num) {
+    return 1.0 - (0.018 * (10 - fin_num));
+}
+
+// =============================================================================
+// Test: SelfHeatingDevMgr init + basic accessors
+// =============================================================================
+
+static void testDevMgrInit() {
+    fprintf(stdout, "--- testDevMgrInit ---\n");
+
+    std::vector<SelfHeatingMosfet> mosfets(3);
+
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 0.5f; mosfets[0].finger_num = 4; mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "OD";
+
+    mosfets[1].llx = 20; mosfets[1].lly = 20; mosfets[1].urx = 30; mosfets[1].ury = 30;
+    mosfets[1].power = 1.0f; mosfets[1].finger_num = 2; mosfets[1].fin_num = 6;
+    mosfets[1].layer_name = "OD";
+
+    mosfets[2].llx = 50; mosfets[2].lly = 50; mosfets[2].urx = 60; mosfets[2].ury = 60;
+    mosfets[2].power = 0.8f; mosfets[2].finger_num = 3; mosfets[2].fin_num = 10;
+    mosfets[2].layer_name = "POLY";
+
+    SelfHeatingDevMgr mgr;
+    mgr.init(mosfets);
+
+    CHECK(mgr.deviceCount() == 3);
+    CHECK_NEAR(mgr.getDevice(0).power, 0.5f, 1e-6);
+    CHECK_NEAR(mgr.getDevice(1).power, 1.0f, 1e-6);
+    CHECK_NEAR(mgr.getDevice(2).power, 0.8f, 1e-6);
+    CHECK(mgr.getDevice(0).finger_num == 4);
+    CHECK(mgr.getDevice(2).fin_num == 10);
+    CHECK(mgr.layerName(mgr.getDevice(0).layer_id) == "OD");
+    CHECK(mgr.layerName(mgr.getDevice(2).layer_id) == "POLY");
+}
+
+// =============================================================================
+// Test: SelfHeatingDevMgr build (deltaT computation)
+// =============================================================================
+
+static void testDevMgrBuild() {
+    fprintf(stdout, "--- testDevMgrBuild ---\n");
+
+    std::vector<SelfHeatingMosfet> mosfets(1);
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 2.0f;
+    mosfets[0].finger_num = 4;
+    mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "OD";
+
+    SelfHeatingDevMgr mgr;
+    mgr.init(mosfets);
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    DeviceLayerParams od;
+    od.Rth = 1000.0;
+    od.finger_effect = testFingerEffect;
+    od.fin_effect = testFinEffect;
+    dlp["OD"] = od;
+
+    mgr.build(dlp);
+
+    double expected_finger = 2.0 * (1.0 - exp(-0.3 * 4));
+    double expected_fin = 1.0 - (0.018 * (10 - 8));
+    double expected_deltaT = 2.0 * 1000.0 / expected_finger / expected_fin;
+
+    CHECK_NEAR(mgr.getDevice(0).deltaT, expected_deltaT, 0.01);
+}
+
+// =============================================================================
+// Test: SelfHeatingDevMgr build — unknown layer defaults to deltaT=0
+// =============================================================================
+
+static void testDevMgrBuildUnknownLayer() {
+    fprintf(stdout, "--- testDevMgrBuildUnknownLayer ---\n");
+
+    std::vector<SelfHeatingMosfet> mosfets(1);
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 2.0f;
+    mosfets[0].finger_num = 4;
+    mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "UNKNOWN";
+
+    SelfHeatingDevMgr mgr;
+    mgr.init(mosfets);
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    mgr.build(dlp);
+
+    CHECK_NEAR(mgr.getDevice(0).deltaT, 0.0f, 1e-6);
+}
+
+// =============================================================================
+// Test: SelfHeatingDevMgr queryOverlap
+// =============================================================================
+
+static void testDevMgrQueryOverlap() {
+    fprintf(stdout, "--- testDevMgrQueryOverlap ---\n");
+
+    // 3 devices at different locations
+    std::vector<SelfHeatingMosfet> mosfets(3);
+
+    mosfets[0].llx = 0;  mosfets[0].lly = 0;  mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 1.0f; mosfets[0].finger_num = 1; mosfets[0].fin_num = 1;
+    mosfets[0].layer_name = "OD";
+
+    mosfets[1].llx = 5;  mosfets[1].lly = 5;  mosfets[1].urx = 15; mosfets[1].ury = 15;
+    mosfets[1].power = 1.0f; mosfets[1].finger_num = 1; mosfets[1].fin_num = 1;
+    mosfets[1].layer_name = "OD";
+
+    mosfets[2].llx = 100; mosfets[2].lly = 100; mosfets[2].urx = 110; mosfets[2].ury = 110;
+    mosfets[2].power = 1.0f; mosfets[2].finger_num = 1; mosfets[2].fin_num = 1;
+    mosfets[2].layer_name = "OD";
+
+    SelfHeatingDevMgr mgr;
+    mgr.init(mosfets);
+
+    std::vector<int> results;
+
+    // Query overlapping device 0 and 1
+    mgr.queryOverlap(3, 3, 12, 12, results);
+    CHECK(results.size() == 2);
+
+    // Query overlapping only device 2
+    mgr.queryOverlap(99, 99, 111, 111, results);
+    CHECK(results.size() == 1);
+    CHECK(results[0] == 2);
+
+    // Query with no overlap
+    mgr.queryOverlap(50, 50, 60, 60, results);
+    CHECK(results.size() == 0);
+}
+
+// =============================================================================
+// Test: SelfHeatingMgr buildViaConn
+// =============================================================================
+
+static void testMgrBuildViaConn() {
+    fprintf(stdout, "--- testMgrBuildViaConn ---\n");
+
+    // Build a simple net:
+    //   node_inst (type 'I') --[via_res]--> node_mid (type 'N') --[wire_res_0]--> node_end (type 'N')
+    //   node_other (type 'N') --[wire_res_1]--> node_far (type 'N')  (not connected to MOSFET)
+
+    EmirNodeInfo node_inst, node_mid, node_end, node_other, node_far;
+    node_inst.setType('I'); node_inst.setX(0); node_inst.setY(0);
+    node_mid.setType('N');  node_mid.setX(5);  node_mid.setY(5);
+    node_end.setType('N');  node_end.setX(10); node_end.setY(10);
+    node_other.setType('N'); node_other.setX(50); node_other.setY(50);
+    node_far.setType('N');  node_far.setX(60); node_far.setY(60);
+
+    // via res: node_inst -> node_mid
+    EmirResInfo via_res;
+    via_res.setIsVia(true);
+    via_res.setN1(&node_inst);
+    via_res.setN2(&node_mid);
+    via_res.setLayer("VIA1");
+    via_res.setBBox(0, 0, 5, 5);
+
+    // wire_res_0: node_mid -> node_end (should be connected)
+    EmirResInfo wire_res_0;
+    wire_res_0.setIsVia(false);
+    wire_res_0.setN1(&node_mid);
+    wire_res_0.setN2(&node_end);
+    wire_res_0.setLayer("M1");
+    wire_res_0.setBBox(0, 0, 10, 10);
+    wire_res_0.setAvgPower(0.01f);
+    wire_res_0.setRmsPower(0.02f);
+
+    // wire_res_1: node_other -> node_far (not connected)
+    EmirResInfo wire_res_1;
+    wire_res_1.setIsVia(false);
+    wire_res_1.setN1(&node_other);
+    wire_res_1.setN2(&node_far);
+    wire_res_1.setLayer("M1");
+    wire_res_1.setBBox(50, 50, 60, 60);
+    wire_res_1.setAvgPower(0.01f);
+    wire_res_1.setRmsPower(0.02f);
+
+    EmirNetInfo net;
+    net.addNode(&node_inst);
+    net.addNode(&node_mid);
+    net.addNode(&node_end);
+    net.addNode(&node_other);
+    net.addNode(&node_far);
+    net.addRes(&via_res);
+    net.addRes(&wire_res_0);
+    net.addRes(&wire_res_1);
+
+    SelfHeatingMgr mgr(&net);
+    mgr.buildViaConn();
+
+    // wire_res_0 has node_mid which is connected via via_res to MOSFET pin
+    // wire_res_1 has no connection to MOSFET pin
+    // We can verify by running compute and checking alpha difference
+    // For now we just verify it doesn't crash and the net has correct structure
+    CHECK(net.reses().size() == 3);
+    CHECK(net.resEmParams().size() == 3);
+}
+
+// =============================================================================
+// Test: SelfHeatingMgr compute (end-to-end)
+// =============================================================================
+
+static void testMgrComputeEndToEnd() {
+    fprintf(stdout, "--- testMgrComputeEndToEnd ---\n");
+
+    // --- Setup devices ---
+    std::vector<SelfHeatingMosfet> mosfets(1);
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 2.0f;
+    mosfets[0].finger_num = 4;
+    mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "OD";
+
+    SelfHeatingDevMgr devMgr;
+    devMgr.init(mosfets);
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    DeviceLayerParams od;
+    od.Rth = 1000.0;
+    od.finger_effect = testFingerEffect;
+    od.fin_effect = testFinEffect;
+    dlp["OD"] = od;
+    devMgr.build(dlp);
+
+    float dev_deltaT = devMgr.getDevice(0).deltaT;
+    CHECK(dev_deltaT > 0.0f);
+
+    // --- Setup params ---
+    SelfHeatingParams params;
+    params.K_SH_Scale = 1.5;
+    params.beta_c1 = 0.001;
+    params.beta_c2 = 0.002;
+    params.beta_c3 = 0.003;
+    params.T_ambient = 25.0;
+    params.device_layers = dlp;
+
+    MetalLayerParams m1;
+    m1.Rth = 500.0;
+    m1.alpha_connecting = 0.5;
+    m1.alpha_overlapping = 0.3;
+    params.metal_layers["M1"] = m1;
+
+    // --- Setup net ---
+    // node_inst (type 'I') --[via_res]--> node_mid --[wire_res_conn]--> node_end
+    // node_other --[wire_res_noconn]--> node_far  (no via to MOSFET)
+    // Both wire res overlap the device at (0,0)-(10,10)
+
+    EmirNodeInfo node_inst, node_mid, node_end, node_other, node_far;
+    node_inst.setType('I');  node_inst.setX(0);  node_inst.setY(0);
+    node_mid.setType('N');   node_mid.setX(5);   node_mid.setY(5);
+    node_end.setType('N');   node_end.setX(10);  node_end.setY(10);
+    node_other.setType('N'); node_other.setX(2);  node_other.setY(2);
+    node_far.setType('N');   node_far.setX(8);   node_far.setY(8);
+
+    EmirResInfo via_res;
+    via_res.setIsVia(true);
+    via_res.setN1(&node_inst);
+    via_res.setN2(&node_mid);
+    via_res.setLayer("VIA1");
+    via_res.setBBox(0, 0, 5, 5);
+
+    float avg_power = 0.01f;
+    float rms_power = 0.02f;
+
+    // wire_res_conn: connected to MOSFET via via -> alpha_connecting
+    EmirResInfo wire_res_conn;
+    wire_res_conn.setIsVia(false);
+    wire_res_conn.setN1(&node_mid);
+    wire_res_conn.setN2(&node_end);
+    wire_res_conn.setLayer("M1");
+    wire_res_conn.setBBox(0, 0, 10, 10);
+    wire_res_conn.setAvgPower(avg_power);
+    wire_res_conn.setRmsPower(rms_power);
+
+    // wire_res_noconn: not connected -> alpha_overlapping
+    EmirResInfo wire_res_noconn;
+    wire_res_noconn.setIsVia(false);
+    wire_res_noconn.setN1(&node_other);
+    wire_res_noconn.setN2(&node_far);
+    wire_res_noconn.setLayer("M1");
+    wire_res_noconn.setBBox(0, 0, 10, 10);
+    wire_res_noconn.setAvgPower(avg_power);
+    wire_res_noconn.setRmsPower(rms_power);
+
+    EmirNetInfo net;
+    net.addNode(&node_inst);
+    net.addNode(&node_mid);
+    net.addNode(&node_end);
+    net.addNode(&node_other);
+    net.addNode(&node_far);
+    net.addRes(&via_res);       // index 0
+    net.addRes(&wire_res_conn); // index 1
+    net.addRes(&wire_res_noconn); // index 2
+
+    // --- Run ---
+    SelfHeatingMgr mgr(&net);
+    mgr.buildViaConn();
+    mgr.compute(devMgr, params);
+
+    // --- Verify ---
+    const std::vector<ResEmParam>& emParams = net.resEmParams();
+
+    // via_res (index 0): skipped, deltaT should remain 0
+    CHECK_NEAR(emParams[0]._deltaT, 0.0f, 1e-6);
+
+    // wire_res_conn (index 1): connected -> alpha_connecting = 0.5
+    // overlap_ratio = 1.0 (wire res and device have identical bbox)
+    double overlap_ratio_conn = 1.0;
+    double beta_conn = params.beta_c1 * dev_deltaT
+                     + params.beta_c2 * rms_power
+                     + params.beta_c3;
+    double deltaT_self_conn = m1.Rth * avg_power;
+    double deltaT_feol_conn = overlap_ratio_conn * m1.alpha_connecting * beta_conn * dev_deltaT;
+    double deltaT_total_conn = (deltaT_self_conn + deltaT_feol_conn) * params.K_SH_Scale;
+
+    CHECK_NEAR(emParams[1]._deltaT, deltaT_total_conn, 0.01);
+
+    // wire_res_noconn (index 2): not connected -> alpha_overlapping = 0.3
+    // overlap_ratio = 1.0 (wire res and device have identical bbox)
+    double overlap_ratio_noconn = 1.0;
+    double beta_noconn = params.beta_c1 * dev_deltaT
+                       + params.beta_c2 * rms_power
+                       + params.beta_c3;
+    double deltaT_self_noconn = m1.Rth * avg_power;
+    double deltaT_feol_noconn = overlap_ratio_noconn * m1.alpha_overlapping * beta_noconn * dev_deltaT;
+    double deltaT_total_noconn = (deltaT_self_noconn + deltaT_feol_noconn) * params.K_SH_Scale;
+
+    CHECK_NEAR(emParams[2]._deltaT, deltaT_total_noconn, 0.01);
+
+    // Connected should have higher deltaT than non-connected (alpha_connecting > alpha_overlapping)
+    CHECK(emParams[1]._deltaT > emParams[2]._deltaT);
+
+    fprintf(stdout, "  wire_res_conn  deltaT = %f (expected %f)\n",
+            emParams[1]._deltaT, deltaT_total_conn);
+    fprintf(stdout, "  wire_res_noconn deltaT = %f (expected %f)\n",
+            emParams[2]._deltaT, deltaT_total_noconn);
+}
+
+// =============================================================================
+// Test: partial overlap — overlap_ratio < 1.0
+// =============================================================================
+
+static void testMgrComputePartialOverlap() {
+    fprintf(stdout, "--- testMgrComputePartialOverlap ---\n");
+
+    // Device at (0,0)-(10,10)
+    std::vector<SelfHeatingMosfet> mosfets(1);
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 2.0f;
+    mosfets[0].finger_num = 4;
+    mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "OD";
+
+    SelfHeatingDevMgr devMgr;
+    devMgr.init(mosfets);
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    DeviceLayerParams od;
+    od.Rth = 1000.0;
+    od.finger_effect = testFingerEffect;
+    od.fin_effect = testFinEffect;
+    dlp["OD"] = od;
+    devMgr.build(dlp);
+
+    float dev_deltaT = devMgr.getDevice(0).deltaT;
+
+    SelfHeatingParams params;
+    params.K_SH_Scale = 1.5;
+    params.beta_c1 = 0.001;
+    params.beta_c2 = 0.002;
+    params.beta_c3 = 0.003;
+    params.T_ambient = 25.0;
+    params.device_layers = dlp;
+
+    MetalLayerParams m1;
+    m1.Rth = 500.0;
+    m1.alpha_connecting = 0.5;
+    m1.alpha_overlapping = 0.3;
+    params.metal_layers["M1"] = m1;
+
+    // Wire res at (5,0)-(20,10): partially overlaps device (0,0)-(10,10)
+    // Intersection: (5,0)-(10,10) = 5*10 = 50
+    // Wire res area: (20-5)*(10-0) = 15*10 = 150
+    // overlap_ratio = 50/150 = 1/3
+    EmirNodeInfo n1, n2;
+    n1.setType('N'); n1.setX(5);  n1.setY(0);
+    n2.setType('N'); n2.setX(20); n2.setY(10);
+
+    EmirResInfo wire_res;
+    wire_res.setIsVia(false);
+    wire_res.setN1(&n1);
+    wire_res.setN2(&n2);
+    wire_res.setLayer("M1");
+    wire_res.setBBox(5, 0, 20, 10);
+    float avg_power = 0.01f;
+    float rms_power = 0.02f;
+    wire_res.setAvgPower(avg_power);
+    wire_res.setRmsPower(rms_power);
+
+    EmirNetInfo net;
+    net.addNode(&n1);
+    net.addNode(&n2);
+    net.addRes(&wire_res);
+
+    SelfHeatingMgr mgr(&net);
+    mgr.buildViaConn();
+    mgr.compute(devMgr, params);
+
+    const std::vector<ResEmParam>& emParams = net.resEmParams();
+
+    double overlap_ratio = 50.0 / 150.0;  // 1/3
+    double beta = params.beta_c1 * dev_deltaT
+                + params.beta_c2 * rms_power
+                + params.beta_c3;
+    double deltaT_self = m1.Rth * avg_power;
+    double deltaT_feol = overlap_ratio * m1.alpha_overlapping * beta * dev_deltaT;
+    double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
+
+    CHECK_NEAR(emParams[0]._deltaT, deltaT_total, 0.01);
+
+    // Verify overlap_ratio < 1.0 actually reduces FEOL contribution vs full overlap
+    double deltaT_feol_full = 1.0 * m1.alpha_overlapping * beta * dev_deltaT;
+    CHECK(deltaT_feol < deltaT_feol_full);
+
+    fprintf(stdout, "  overlap_ratio = %f\n", overlap_ratio);
+    fprintf(stdout, "  deltaT = %f (expected %f)\n",
+            emParams[0]._deltaT, deltaT_total);
+    fprintf(stdout, "  deltaT_feol partial = %f vs full = %f\n",
+            deltaT_feol, deltaT_feol_full);
+}
+
+// =============================================================================
+// Test: empty input
+// =============================================================================
+
+static void testEmptyInput() {
+    fprintf(stdout, "--- testEmptyInput ---\n");
+
+    // Empty mosfets
+    std::vector<SelfHeatingMosfet> mosfets;
+    SelfHeatingDevMgr devMgr;
+    devMgr.init(mosfets);
+    CHECK(devMgr.deviceCount() == 0);
+
+    std::vector<int> results;
+    devMgr.queryOverlap(0, 0, 10, 10, results);
+    CHECK(results.size() == 0);
+
+    // Empty net
+    EmirNetInfo net;
+    SelfHeatingMgr mgr(&net);
+    mgr.buildViaConn();
+
+    SelfHeatingParams params;
+    mgr.compute(devMgr, params);
+    CHECK(net.resEmParams().size() == 0);
+}
+
+// =============================================================================
+// Test: wire res with no metal layer params (should be skipped)
+// =============================================================================
+
+static void testMissingMetalLayer() {
+    fprintf(stdout, "--- testMissingMetalLayer ---\n");
+
+    std::vector<SelfHeatingMosfet> mosfets(1);
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 1.0f; mosfets[0].finger_num = 1; mosfets[0].fin_num = 1;
+    mosfets[0].layer_name = "OD";
+
+    SelfHeatingDevMgr devMgr;
+    devMgr.init(mosfets);
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    DeviceLayerParams od;
+    od.Rth = 1000.0;
+    dlp["OD"] = od;
+    devMgr.build(dlp);
+
+    // params with no metal layer for "M2"
+    SelfHeatingParams params;
+    params.device_layers = dlp;
+    MetalLayerParams m1;
+    m1.Rth = 500.0;
+    m1.alpha_connecting = 0.5;
+    m1.alpha_overlapping = 0.3;
+    params.metal_layers["M1"] = m1;
+    // No "M2" entry
+
+    EmirNodeInfo n1, n2;
+    n1.setType('N'); n1.setX(0); n1.setY(0);
+    n2.setType('N'); n2.setX(10); n2.setY(10);
+
+    EmirResInfo wire_res;
+    wire_res.setIsVia(false);
+    wire_res.setN1(&n1);
+    wire_res.setN2(&n2);
+    wire_res.setLayer("M2");  // not in params
+    wire_res.setBBox(0, 0, 10, 10);
+    wire_res.setAvgPower(0.01f);
+    wire_res.setRmsPower(0.02f);
+
+    EmirNetInfo net;
+    net.addNode(&n1);
+    net.addNode(&n2);
+    net.addRes(&wire_res);
+
+    SelfHeatingMgr mgr(&net);
+    mgr.buildViaConn();
+    mgr.compute(devMgr, params);
+
+    // deltaT should remain 0 since M2 is not in metal_layers
+    CHECK_NEAR(net.resEmParams()[0]._deltaT, 0.0f, 1e-6);
+}
+
+// =============================================================================
+// main
+// =============================================================================
+
+int main() {
+    fprintf(stdout, "=== Self-Heating Test Suite ===\n\n");
+
+    testDevMgrInit();
+    testDevMgrBuild();
+    testDevMgrBuildUnknownLayer();
+    testDevMgrQueryOverlap();
+    testMgrBuildViaConn();
+    testMgrComputeEndToEnd();
+    testMgrComputePartialOverlap();
+    testEmptyInput();
+    testMissingMetalLayer();
+
+    fprintf(stdout, "\n=== Results: %d passed, %d failed ===\n",
+            g_testsPassed, g_testsFailed);
+
+    return (g_testsFailed > 0) ? 1 : 0;
+}
