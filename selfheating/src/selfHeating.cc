@@ -213,28 +213,38 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
 // Phase 2: Compute deltaT for each device.
 // Formula: deltaT = power * Rth / finger_effect / fin_effect
 // If the device layer is not found in params, deltaT is set to 0.
+//
+// Optimization: pre-build layer_id -> DeviceLayerParams* lookup table
+// so each device does O(1) array access instead of O(log M) string map find.
 void SelfHeatingDevMgr::build(
     const std::map<std::string, DeviceLayerParams>& device_layers)
 {
+    // Build layer_id -> DeviceLayerParams* table for O(1) lookup
+    std::vector<const DeviceLayerParams*> dlpTable(_layerNames.size(), NULL);
+    for (size_t lid = 0; lid < _layerNames.size(); ++lid) {
+        std::map<std::string, DeviceLayerParams>::const_iterator it =
+            device_layers.find(_layerNames[lid]);
+        if (it != device_layers.end()) {
+            dlpTable[lid] = &it->second;
+        }
+    }
+
     for (int i = 0; i < (int)_devices.size(); ++i) {
         SelfHeatingDevStr& dev = _devices[i];
-        const std::string& layer = _layerNames[dev.layer_id];
 
-        std::map<std::string, DeviceLayerParams>::const_iterator it =
-            device_layers.find(layer);
-        if (it == device_layers.end()) {
+        const DeviceLayerParams* lp = dlpTable[dev.layer_id];
+        if (!lp) {
             dev.deltaT = 0.0f;
             continue;
         }
-        const DeviceLayerParams& lp = it->second;
 
         // Apply effect functions; default to 1.0 if not specified
-        double finger_eff = lp.finger_effect
-                            ? lp.finger_effect(dev.finger_num) : 1.0;
-        double fin_eff = lp.fin_effect
-                         ? lp.fin_effect(dev.fin_num) : 1.0;
+        double finger_eff = lp->finger_effect
+                            ? lp->finger_effect(dev.finger_num) : 1.0;
+        double fin_eff = lp->fin_effect
+                         ? lp->fin_effect(dev.fin_num) : 1.0;
 
-        dev.deltaT = (float)(dev.power * lp.Rth / finger_eff / fin_eff);
+        dev.deltaT = (float)(dev.power * lp->Rth / finger_eff / fin_eff);
     }
 }
 
@@ -419,6 +429,12 @@ static void computeRange(
     std::vector<int> overlap;
     std::vector<bool> visited(devMgr.deviceCount(), false);
 
+    // Cache params constants to local variables (avoid repeated struct access)
+    const double beta_c1 = params.beta_c1;
+    const double beta_c2 = params.beta_c2;
+    const double beta_c3 = params.beta_c3;
+    const double K_SH_Scale = params.K_SH_Scale;
+
     for (size_t r = begin; r < end; ++r) {
         EmirResInfo* res = reses[r];
         if (res->isVia()) continue;
@@ -445,10 +461,12 @@ static void computeRange(
         devMgr.queryOverlap(res->llx(), res->lly(),
                             res->urx(), res->ury(), overlap, visited);
 
-        // Hoist alpha lookup before the device j-loop (P0 fix)
+        // Hoist alpha and rmsPower before j-loop (loop-invariant)
         double alpha = isConnected[r]
                        ? mlp.alpha_connecting
                        : mlp.alpha_overlapping;
+        double rms_power = res->rmsPower();
+        double beta_c2_rms = beta_c2 * rms_power;
 
         for (int j = 0; j < (int)overlap.size(); ++j) {
             const SelfHeatingDevStr& dev = devMgr.getDevice(overlap[j]);
@@ -461,9 +479,9 @@ static void computeRange(
                               * (inter_ury - inter_lly);
             double overlap_ratio = inter_area / res_area;
 
-            double beta = params.beta_c1 * dev.deltaT
-                        + params.beta_c2 * res->rmsPower()
-                        + params.beta_c3;
+            double beta = beta_c1 * dev.deltaT
+                        + beta_c2_rms
+                        + beta_c3;
 
             double contribution = overlap_ratio * alpha * beta * dev.deltaT;
             if (debug >= 2) {
@@ -474,7 +492,7 @@ static void computeRange(
             deltaT_feol += contribution;
         }
 
-        double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
+        double deltaT_total = (deltaT_self + deltaT_feol) * K_SH_Scale;
         emParams[r]._deltaT = (float)deltaT_total;
 
         if (debug >= 1) {
@@ -545,24 +563,33 @@ void SelfHeatingMgr::compute(
     clock_t t0 = clock();
 
     // Build mlpTable: layerIdx -> MetalLayerParams* for O(1) lookup
-    // Find max layerIdx across all wire res to size the table
+    //
+    // Two-pass O(N) algorithm replacing O(N*M) nested loop:
+    //   Pass 1: Scan wire res once to build layerIdx -> layerName mapping
+    //   Pass 2: For each mapped layer, lookup metal_layers map once
     int maxLayerIdx = -1;
     for (size_t i = 0; i < reses.size(); ++i) {
         if (!reses[i]->isVia() && reses[i]->layerIdx() > maxLayerIdx)
             maxLayerIdx = reses[i]->layerIdx();
     }
     std::vector<const MetalLayerParams*> mlpTable(maxLayerIdx + 1, NULL);
-    for (std::map<std::string, MetalLayerParams>::const_iterator it =
-             params.metal_layers.begin();
-         it != params.metal_layers.end(); ++it) {
-        // Find a wire res with this layer name to get its layerIdx
+    {
+        // Pass 1: collect layerIdx -> layer name (first occurrence wins)
+        std::vector<const std::string*> idxToName(maxLayerIdx + 1, NULL);
         for (size_t i = 0; i < reses.size(); ++i) {
-            if (!reses[i]->isVia() && reses[i]->layer() == it->first) {
-                int lidx = reses[i]->layerIdx();
-                if (lidx >= 0 && lidx <= maxLayerIdx) {
-                    mlpTable[lidx] = &it->second;
-                }
-                break;
+            if (reses[i]->isVia()) continue;
+            int lidx = reses[i]->layerIdx();
+            if (lidx >= 0 && lidx <= maxLayerIdx && !idxToName[lidx]) {
+                idxToName[lidx] = &reses[i]->layer();
+            }
+        }
+        // Pass 2: lookup metal_layers map for each distinct layerIdx
+        for (int lidx = 0; lidx <= maxLayerIdx; ++lidx) {
+            if (!idxToName[lidx]) continue;
+            std::map<std::string, MetalLayerParams>::const_iterator it =
+                params.metal_layers.find(*idxToName[lidx]);
+            if (it != params.metal_layers.end()) {
+                mlpTable[lidx] = &it->second;
             }
         }
     }
