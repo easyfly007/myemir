@@ -764,15 +764,13 @@ T_new = T_ambient + deltaT_total
 
 #### P2 — 有改善空间
 
-- [ ] **metal_layers 查找从 string map 改为 layer_id + 数组**
-  - 位置：`selfHeating.cc:293-295`
-  - 问题：每个 wire res 做一次 `std::map<string,...>::find`，metal_layers ~10 个 entry → 每次 ~3-4 次 string 比较。2.5 亿 × 3 = **7.5 亿次** string 比较
-  - 方案：为 wire res 也建 layer_id 映射（类似 SelfHeatingDevStr），用数组下标 O(1) 访问 MetalLayerParams
+- [x] **~~metal_layers 查找从 string map 改为 layerIdx + 数组~~**（已完成）
+  - compute() 入口一次性建 `vector<const MetalLayerParams*>` 索引表（layerIdx → params）
+  - computeRange() 中用 `res->layerIdx()` 做 O(1) 数组访问，替代 `map<string>::find`
 
-- [ ] **buildViaConn() 的 connectedNodes std::set 操作**（部分改善）
-  - `_connectedRes` 已改为 `vector<bool>`（见 P1），Pass 2 写入变为 O(1)
-  - 剩余问题：`connectedNodes`（std::set\<EmirNodeInfo\*\>）仍为红黑树，Pass 1 的 insert 和 Pass 2 的 count 仍为 O(log N)
-  - 方案：`connectedNodes` 改用排序 vector + binary_search
+- [x] **~~buildViaConn() 的 connectedNodes std::set 操作~~**（已完成）
+  - 已改为 `vector<bool>(nodes.size())` + `node->idx()` 做 O(1) bitmap 查找
+  - 完全消除 std::set，零堆分配，Pass 1 和 Pass 2 均为 O(N) 线性
 
 ### 9.2 内存瓶颈
 
@@ -827,8 +825,8 @@ T_new = T_ambient + deltaT_total
 | ~~P1~~ | ~~CPU~~ | ~~queryOverlap sort+unique~~ | ~~已修复：bitmap 去重替代 sort+unique~~ |
 | ~~P1~~ | ~~CPU~~ | ~~`_connectedRes` 用 std::set~~ | ~~已修复：改为 vector\<bool\>~~ |
 | ~~P1~~ | ~~CPU~~ | ~~grid 平均 50 dev/cell~~ | ~~已修复：动态分辨率 ~8 dev/cell~~ |
-| P2 | CPU | metal_layers string map | 7.5 亿次 string 比较 |
-| P2 | CPU | buildViaConn set 操作 | 10 亿次 O(log N) + 堆分配 |
+| ~~P2~~ | ~~CPU~~ | ~~metal_layers string map~~ | ~~已修复：layerIdx + 数组 O(1)~~ |
+| ~~P2~~ | ~~CPU~~ | ~~buildViaConn set 操作~~ | ~~已修复：node idx bitmap O(1)~~ |
 | P0 | 内存 | init() 峰值（非本模块可修复） | ~5 GB（上层接口决定） |
 | ~~P1~~ | ~~内存~~ | ~~gridCells 碎片化~~ | ~~已修复：CSR 格式，2 次 malloc~~ |
 | P2 | 内存 | emir 侧 500M string | ~24 GB（emir 侧） |

@@ -197,6 +197,7 @@ static void testMgrBuildViaConn() {
     wire_res_0.setN1(&node_mid);
     wire_res_0.setN2(&node_end);
     wire_res_0.setLayer("M1");
+    wire_res_0.setLayerIdx(0);
     wire_res_0.setBBox(0, 0, 10, 10);
     wire_res_0.setAvgPower(0.01f);
     wire_res_0.setRmsPower(0.02f);
@@ -207,6 +208,7 @@ static void testMgrBuildViaConn() {
     wire_res_1.setN1(&node_other);
     wire_res_1.setN2(&node_far);
     wire_res_1.setLayer("M1");
+    wire_res_1.setLayerIdx(0);
     wire_res_1.setBBox(50, 50, 60, 60);
     wire_res_1.setAvgPower(0.01f);
     wire_res_1.setRmsPower(0.02f);
@@ -306,6 +308,7 @@ static void testMgrComputeEndToEnd() {
     wire_res_conn.setN1(&node_mid);
     wire_res_conn.setN2(&node_end);
     wire_res_conn.setLayer("M1");
+    wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
     wire_res_conn.setAvgPower(avg_power);
     wire_res_conn.setRmsPower(rms_power);
@@ -316,6 +319,7 @@ static void testMgrComputeEndToEnd() {
     wire_res_noconn.setN1(&node_other);
     wire_res_noconn.setN2(&node_far);
     wire_res_noconn.setLayer("M1");
+    wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
     wire_res_noconn.setAvgPower(avg_power);
     wire_res_noconn.setRmsPower(rms_power);
@@ -431,6 +435,7 @@ static void testMgrComputePartialOverlap() {
     wire_res.setN1(&n1);
     wire_res.setN2(&n2);
     wire_res.setLayer("M1");
+    wire_res.setLayerIdx(0);
     wire_res.setBBox(5, 0, 20, 10);
     float avg_power = 0.01f;
     float rms_power = 0.02f;
@@ -541,6 +546,7 @@ static void testMissingMetalLayer() {
     wire_res.setN1(&n1);
     wire_res.setN2(&n2);
     wire_res.setLayer("M2");  // not in params
+    wire_res.setLayerIdx(1);
     wire_res.setBBox(0, 0, 10, 10);
     wire_res.setAvgPower(0.01f);
     wire_res.setRmsPower(0.02f);
@@ -626,6 +632,7 @@ static void testMgrComputeMultiThread() {
     wire_res_conn.setN1(&node_mid);
     wire_res_conn.setN2(&node_end);
     wire_res_conn.setLayer("M1");
+    wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
     wire_res_conn.setAvgPower(avg_power);
     wire_res_conn.setRmsPower(rms_power);
@@ -635,6 +642,7 @@ static void testMgrComputeMultiThread() {
     wire_res_noconn.setN1(&node_other);
     wire_res_noconn.setN2(&node_far);
     wire_res_noconn.setLayer("M1");
+    wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
     wire_res_noconn.setAvgPower(avg_power);
     wire_res_noconn.setRmsPower(rms_power);

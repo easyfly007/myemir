@@ -412,6 +412,7 @@ static void computeRange(
     std::vector<ResEmParam>& emParams,
     const SelfHeatingDevMgr& devMgr,
     const SelfHeatingParams& params,
+    const std::vector<const MetalLayerParams*>& mlpTable,
     const std::vector<bool>& isConnected,
     int debug, EmirNetInfo* net)
 {
@@ -422,11 +423,10 @@ static void computeRange(
         EmirResInfo* res = reses[r];
         if (res->isVia()) continue;
 
-        const std::string& wire_layer = res->layer();
-        std::map<std::string, MetalLayerParams>::const_iterator mlp_it =
-            params.metal_layers.find(wire_layer);
-        if (mlp_it == params.metal_layers.end()) continue;
-        const MetalLayerParams& mlp = mlp_it->second;
+        // O(1) layer params lookup via layerIdx (replaces string map find)
+        int lidx = res->layerIdx();
+        if (lidx < 0 || lidx >= (int)mlpTable.size() || !mlpTable[lidx]) continue;
+        const MetalLayerParams& mlp = *mlpTable[lidx];
 
         double deltaT_self = mlp.Rth * res->avgPower();
 
@@ -438,7 +438,7 @@ static void computeRange(
 
         if (debug >= 2) {
             net->mgr()->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
-                       r, wire_layer.c_str(),
+                       r, res->layer().c_str(),
                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
         }
 
@@ -497,6 +497,7 @@ struct SHComputeArg : public EmirMtmqArg {
     std::vector<ResEmParam>* emParams;
     const SelfHeatingDevMgr* devMgr;
     const SelfHeatingParams* params;
+    const std::vector<const MetalLayerParams*>* mlpTable;
     const std::vector<bool>* isConnected;
     int debug;
     EmirNetInfo* net;
@@ -510,7 +511,7 @@ public:
         SHComputeArg* a = static_cast<SHComputeArg*>(arg);
         computeRange(j->begin, j->end,
                      *a->reses, *a->emParams, *a->devMgr, *a->params,
-                     *a->isConnected, a->debug, a->net);
+                     *a->mlpTable, *a->isConnected, a->debug, a->net);
     }
 };
 
@@ -543,10 +544,33 @@ void SelfHeatingMgr::compute(
 
     clock_t t0 = clock();
 
+    // Build mlpTable: layerIdx -> MetalLayerParams* for O(1) lookup
+    // Find max layerIdx across all wire res to size the table
+    int maxLayerIdx = -1;
+    for (size_t i = 0; i < reses.size(); ++i) {
+        if (!reses[i]->isVia() && reses[i]->layerIdx() > maxLayerIdx)
+            maxLayerIdx = reses[i]->layerIdx();
+    }
+    std::vector<const MetalLayerParams*> mlpTable(maxLayerIdx + 1, NULL);
+    for (std::map<std::string, MetalLayerParams>::const_iterator it =
+             params.metal_layers.begin();
+         it != params.metal_layers.end(); ++it) {
+        // Find a wire res with this layer name to get its layerIdx
+        for (size_t i = 0; i < reses.size(); ++i) {
+            if (!reses[i]->isVia() && reses[i]->layer() == it->first) {
+                int lidx = reses[i]->layerIdx();
+                if (lidx >= 0 && lidx <= maxLayerIdx) {
+                    mlpTable[lidx] = &it->second;
+                }
+                break;
+            }
+        }
+    }
+
     if (_numThreads <= 1) {
         // Single-threaded path
         computeRange(0, reses.size(), reses, emParams, devMgr, params,
-                     _isConnected, _debug, _net);
+                     mlpTable, _isConnected, _debug, _net);
     } else {
         // Multi-threaded path via mtmq
         size_t n = reses.size();
@@ -565,6 +589,7 @@ void SelfHeatingMgr::compute(
         arg.emParams = &emParams;
         arg.devMgr = &devMgr;
         arg.params = &params;
+        arg.mlpTable = &mlpTable;
         arg.isConnected = &_isConnected;
         arg.debug = _debug;
         arg.net = _net;
