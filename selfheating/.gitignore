@@ -7,7 +7,7 @@ build/
 *.dylib
 
 # Compiled test binaries
-test_selfHeating
+test_selfheating
 
 # IDE / editor files
 .vscode/
