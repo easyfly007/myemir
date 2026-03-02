@@ -217,8 +217,8 @@ const std::string& SelfHeatingDevMgr::layerName(short layer_id) const {
 //   2. compute()      - calculate deltaT for each wire res, write to ResEmParam
 // =============================================================================
 
-SelfHeatingMgr::SelfHeatingMgr(EmirNetInfo* net)
-    : _net(net)
+SelfHeatingMgr::SelfHeatingMgr(EmirNetInfo* net, int debug)
+    : _net(net), _debug(debug)
 {}
 
 // Build the set of wire res that are connected to MOSFET pins via one-hop
@@ -306,9 +306,11 @@ void SelfHeatingMgr::compute(
                         * (res->ury() - res->lly());
         if (res_area <= 0.0) continue;  // degenerate res, skip
 
-        _net->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
-                    r, wire_layer.c_str(),
-                    res->llx(), res->lly(), res->urx(), res->ury(), res_area);
+        if (_debug >= 2) {
+            _net->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
+                        r, wire_layer.c_str(),
+                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
+        }
 
         devMgr.queryOverlap(res->llx(), res->lly(),
                             res->urx(), res->ury(), overlap);
@@ -336,8 +338,10 @@ void SelfHeatingMgr::compute(
                         + params.beta_c3;
 
             double contribution = overlap_ratio * alpha * beta * dev.deltaT;
-            _net->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
-                        overlap[j], overlap_ratio, alpha, beta, contribution);
+            if (_debug >= 2) {
+                _net->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
+                            overlap[j], overlap_ratio, alpha, beta, contribution);
+            }
 
             deltaT_feol += contribution;
         }
@@ -346,7 +350,9 @@ void SelfHeatingMgr::compute(
         double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
         emParams[r]._deltaT = (float)deltaT_total;
 
-        _net->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
-                    r, deltaT_self, deltaT_feol, deltaT_total);
+        if (_debug >= 1) {
+            _net->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
+                        r, deltaT_self, deltaT_feol, deltaT_total);
+        }
     }
 }

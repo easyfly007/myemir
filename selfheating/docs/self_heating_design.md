@@ -694,7 +694,62 @@ T_new = T_ambient + deltaT_total
 - 不实现 wire res 之间的热传递
 - MOSFET 之间不互相影响热量
 
-## 9. 未来扩展方向
+## 9. 性能优化 TODO（目标规模：5 亿 res / 5000 万 MOSFET）
+
+### P0 — 必须优先解决
+
+- [ ] **去掉 compute() 中的无条件 debug 输出**
+  - 位置：`selfHeating.cc` compute() 中的 3 处 `_net->debug(...)` 调用
+  - 问题：5 亿 wire res + overlap pair → 10 亿+ 次 `vfprintf`，即使 stderr 重定向到 /dev/null，格式化解析的 CPU 开销仍可能占总时间 30-50%
+  - 方案：加 debug flag 控制，默认关闭；或改用 buffered debug（参考 mtmq 的 EmirMtmqDebug）
+
+- [ ] **Per-net 循环并行化**
+  - 位置：上层调用代码 `for (size_t n = 0; n < nets.size(); ++n)` 串行循环
+  - 问题：每个 net 独立处理，但完全串行，无法利用多核
+  - 方案：接入 mtmq 线程池。`devMgr` 和 `params` 只读，天然线程安全；每个 net 的 `SelfHeatingMgr` 是独立临时对象，无竞争。注意 `queryOverlap` 的 `results` vector 需要 per-thread 复用
+
+### P1 — 显著影响性能
+
+- [ ] **queryOverlap() 去重改用 bitmap 替代 sort+unique**
+  - 位置：`selfHeating.cc:191-192`
+  - 问题：对 5 亿个 wire res 每个都调一次 sort+unique，累积开销巨大
+  - 方案：分配一个 `vector<bool>` 或 bitmap（大小 = deviceCount），用 visited 标记去重，查询结束后清除标记（只清本次标记的位置，不 memset 全部）
+
+- [ ] **_connectedRes 从 std::set 改为 O(1) 查找结构**
+  - 位置：`selfHeating.h:175`，`selfHeating.cc:329`
+  - 问题：`_connectedRes.count(res)` 在 overlap 内循环中调用，红黑树 O(log N) + cache miss。假设平均每个 wire res overlap 2 个 device，总调用 ~10 亿次
+  - 方案：改用 `std::vector<bool>`（下标 = res 在 net 中的 offset），O(1) 查找
+
+- [ ] **Uniform Grid 密度调整**
+  - 位置：`selfHeating.cc:86-91`
+  - 问题：固定 1000x1000 grid，5000 万 device → 平均 50 dev/cell；device 分布不均时热点 cell 可能有数千个 device，线性扫描退化
+  - 方案：动态调整 grid 分辨率，使 `device_count / cell_count` 控制在 ~5-10。如 5000 万 device 可用 3000x3000 grid（900 万 cell）
+
+### P2 — 有改善空间
+
+- [ ] **metal_layers 查找从 string map 改为 layer_id + 数组**
+  - 位置：`selfHeating.cc:293-295`
+  - 问题：每个 wire res 做一次 `std::map<string,...>::find`，5 亿次 string 比较
+  - 方案：为 wire res 也建 layer_id 映射（类似 SelfHeatingDevStr），用数组下标 O(1) 访问 MetalLayerParams
+
+- [ ] **gridCells 从 vector<vector<int>> 改为 CSR 格式**
+  - 位置：`selfHeating.h:139`
+  - 问题：100 万个 `std::vector<int>` = 100 万次独立堆分配，内存碎片化严重，遍历 cache miss 高
+  - 方案：两阶段构建——先统计每个 cell 的 device 数量，再用一个大的 `vector<int>` + offset 数组（CSR），堆分配从 100 万次降为 2 次
+
+- [ ] **init() 接口优化降低峰值内存**
+  - 位置：`selfHeating.cc:52`
+  - 问题：5000 万 `SelfHeatingMosfet`（每个含 `std::string layer_name`）+ `_devices` vector 同时在内存，峰值 ~4-5 GB
+  - 方案：改用 iterator/callback 接口逐个拷贝；或让 init 接受 raw pointer + size + layer name 数组，避免 5000 万个 string 对象
+
+### P3 — 小改善
+
+- [ ] **buildViaConn() 的 std::set 改为更高效结构**
+  - 位置：`selfHeating.cc:239`
+  - 问题：大 power net（百万级 res/node）下，`std::set<EmirNodeInfo*>` 的树操作 + 指针比较性能差
+  - 方案：改用排序 vector + binary_search，或 hash set
+
+## 10. 未来扩展方向
 
 - 支持电热迭代收敛（温度 → 电阻更新 → 重新求解 → 新温度 → ...）
 - Wire res 之间的热传递

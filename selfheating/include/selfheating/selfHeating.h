@@ -158,8 +158,11 @@ private:
 
 class SelfHeatingMgr {
 public:
-    // Constructor takes the net to process
-    SelfHeatingMgr(EmirNetInfo* net);
+    // Constructor takes the net to process and optional debug level.
+    //   0 = no debug output (default)
+    //   1 = summary per wire res (deltaT result)
+    //   2 = verbose per-device overlap details
+    SelfHeatingMgr(EmirNetInfo* net, int debug = 0);
 
     // Scan via res in this net to identify wire res connected to MOSFET pins.
     // Must be called before compute().
@@ -172,6 +175,7 @@ public:
 
 private:
     EmirNetInfo* _net;
+    int _debug;
     std::set<const EmirResInfo*> _connectedRes; // wire res via-connected to MOSFET
 };
 
