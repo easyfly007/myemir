@@ -95,29 +95,88 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
     _nx = (int)((width / _cellSize) + 1);
     _ny = (int)((height / _cellSize) + 1);
 
-    // Step 4: Populate grid cells with device indices
-    _gridCells.clear();
-    _gridCells.resize(_nx * _ny);
+    // Step 4: Build CSR (Compressed Sparse Row) grid — two-pass algorithm
+    //
+    // Replaces vector<vector<int>> which caused ~6M independent heap
+    // allocations and poor cache locality. CSR packs all device indices
+    // into one contiguous array (_gridData) with an offset table
+    // (_gridOffsets), reducing malloc count from ~6M to 2.
+    //
+    // Pass 1 (count):  count how many device indices each cell receives
+    // Pass 2 (fill):   write device indices into the correct positions
+
+    int numCells = _nx * _ny;
+
+    // _gridOffsets doubles as a count array during Pass 1, then becomes
+    // the prefix-sum / offset array after conversion.
+    _gridOffsets.assign(numCells + 1, 0);
+
+    // --- Pass 1: count entries per cell ---
     for (int i = 0; i < (int)_devices.size(); ++i) {
-        // Map device bbox to grid cell range
         int gx0 = (int)((_devices[i].llx - _originX) / _cellSize);
         int gy0 = (int)((_devices[i].lly - _originY) / _cellSize);
         int gx1 = (int)((_devices[i].urx - _originX) / _cellSize);
         int gy1 = (int)((_devices[i].ury - _originY) / _cellSize);
 
-        // Clamp to grid bounds
         if (gx0 < 0) gx0 = 0;
         if (gy0 < 0) gy0 = 0;
         if (gx1 >= _nx) gx1 = _nx - 1;
         if (gy1 >= _ny) gy1 = _ny - 1;
 
-        // Insert device index into all covered cells
         for (int gy = gy0; gy <= gy1; ++gy) {
             for (int gx = gx0; gx <= gx1; ++gx) {
-                _gridCells[_cellIndex(gx, gy)].push_back(i);
+                ++_gridOffsets[_cellIndex(gx, gy)];
             }
         }
     }
+
+    // Convert counts to prefix sums (exclusive scan):
+    //   _gridOffsets[i] = sum of counts for cells 0..i-1
+    // After this, _gridOffsets[numCells] = total number of entries.
+    {
+        int running = 0;
+        for (int c = 0; c < numCells; ++c) {
+            int count = _gridOffsets[c];
+            _gridOffsets[c] = running;
+            running += count;
+        }
+        _gridOffsets[numCells] = running;
+    }
+
+    // Allocate the contiguous data array
+    _gridData.resize(_gridOffsets[numCells]);
+
+    // --- Pass 2: fill device indices using write cursors ---
+    // We use _gridOffsets as write cursors: _gridOffsets[c] points to the
+    // next write position for cell c. After filling, each _gridOffsets[c]
+    // equals the original _gridOffsets[c+1], so we shift right to restore.
+    for (int i = 0; i < (int)_devices.size(); ++i) {
+        int gx0 = (int)((_devices[i].llx - _originX) / _cellSize);
+        int gy0 = (int)((_devices[i].lly - _originY) / _cellSize);
+        int gx1 = (int)((_devices[i].urx - _originX) / _cellSize);
+        int gy1 = (int)((_devices[i].ury - _originY) / _cellSize);
+
+        if (gx0 < 0) gx0 = 0;
+        if (gy0 < 0) gy0 = 0;
+        if (gx1 >= _nx) gx1 = _nx - 1;
+        if (gy1 >= _ny) gy1 = _ny - 1;
+
+        for (int gy = gy0; gy <= gy1; ++gy) {
+            for (int gx = gx0; gx <= gx1; ++gx) {
+                int ci = _cellIndex(gx, gy);
+                _gridData[_gridOffsets[ci]] = i;
+                ++_gridOffsets[ci];
+            }
+        }
+    }
+
+    // Shift _gridOffsets right by one to restore original prefix sums.
+    // After Pass 2, _gridOffsets[c] == original _gridOffsets[c+1] for all c,
+    // so we shift right and set [0] = 0.
+    for (int c = numCells; c > 0; --c) {
+        _gridOffsets[c] = _gridOffsets[c - 1];
+    }
+    _gridOffsets[0] = 0;
 }
 
 // Phase 2: Compute deltaT for each device.
@@ -154,11 +213,18 @@ void SelfHeatingDevMgr::build(
 //
 // Results are returned via output parameter to allow caller reuse
 // (avoids repeated heap allocation across ~300M queries).
-// Results are sorted and deduplicated since a device spanning
-// multiple grid cells would otherwise appear multiple times.
+//
+// Why 'visited' bitmap is needed for deduplication:
+// A device whose bbox spans multiple grid cells is inserted into every cell
+// it covers during init(). When a query rectangle also covers multiple cells,
+// that same device index appears in each overlapping cell, producing duplicates
+// in results. The visited bitmap provides O(1) per-element dedup, replacing
+// the previous std::sort + std::unique which had significant fixed overhead
+// accumulated over ~250M calls.
 void SelfHeatingDevMgr::queryOverlap(
     float llx, float lly, float urx, float ury,
-    std::vector<int>& results) const
+    std::vector<int>& results,
+    std::vector<bool>& visited) const
 {
     results.clear();
 
@@ -176,25 +242,30 @@ void SelfHeatingDevMgr::queryOverlap(
     if (gx1 >= _nx) gx1 = _nx - 1;
     if (gy1 >= _ny) gy1 = _ny - 1;
 
-    // Check each candidate in covered cells
+    // Check each candidate in covered cells via CSR offset access,
+    // deduplicate via bitmap.
+    // For cell ci, device indices are _gridData[ _gridOffsets[ci] .. _gridOffsets[ci+1] )
     for (int gy = gy0; gy <= gy1; ++gy) {
         for (int gx = gx0; gx <= gx1; ++gx) {
-            const std::vector<int>& cell = _gridCells[_cellIndex(gx, gy)];
-            for (size_t k = 0; k < cell.size(); ++k) {
-                int idx = cell[k];
+            int ci = _cellIndex(gx, gy);
+            for (int k = _gridOffsets[ci]; k < _gridOffsets[ci + 1]; ++k) {
+                int idx = _gridData[k];
                 const SelfHeatingDevStr& dev = _devices[idx];
                 // Exact bbox overlap test
                 if (dev.urx > llx && dev.llx < urx &&
                     dev.ury > lly && dev.lly < ury) {
-                    results.push_back(idx);
+                    if (!visited[idx]) {
+                        visited[idx] = true;
+                        results.push_back(idx);
+                    }
                 }
             }
         }
     }
 
-    // Deduplicate (a device may appear in multiple grid cells)
-    std::sort(results.begin(), results.end());
-    results.erase(std::unique(results.begin(), results.end()), results.end());
+    // Reset only the entries we touched (typically 0-5 elements)
+    for (size_t i = 0; i < results.size(); ++i)
+        visited[results[i]] = false;
 }
 
 int SelfHeatingDevMgr::deviceCount() const {
@@ -281,6 +352,7 @@ static void computeRange(
     int debug, EmirNetInfo* net)
 {
     std::vector<int> overlap;
+    std::vector<bool> visited(devMgr.deviceCount(), false);
 
     for (size_t r = begin; r < end; ++r) {
         EmirResInfo* res = reses[r];
@@ -307,7 +379,7 @@ static void computeRange(
         }
 
         devMgr.queryOverlap(res->llx(), res->lly(),
-                            res->urx(), res->ury(), overlap);
+                            res->urx(), res->ury(), overlap, visited);
 
         // Hoist alpha lookup before the device j-loop (P0 fix)
         double alpha = isConnected[r]

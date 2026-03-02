@@ -292,9 +292,10 @@ public:
     // Phase 2: 用 device layer 参数计算每个 device 的 deltaT
     void build(const std::map<std::string, DeviceLayerParams>& device_layers);
 
-    // 查询与给定 bbox 重叠的 device 索引（调用方复用 vector）
+    // 查询与给定 bbox 重叠的 device 索引（调用方复用 results 和 visited）
     void queryOverlap(float llx, float lly, float urx, float ury,
-                      std::vector<int>& results) const;
+                      std::vector<int>& results,
+                      std::vector<bool>& visited) const;
 
     // 访问 device
     int deviceCount() const;
@@ -315,8 +316,12 @@ private:
     std::vector<std::string> _layerNames;          // id -> name
     std::map<std::string, short> _layerNameToId;   // name -> id
 
-    // Uniform Grid
-    std::vector<std::vector<int> > _gridCells;  // _gridCells[cell_idx] = device indices
+    // Uniform Grid — CSR (Compressed Sparse Row) format
+    // All device indices packed into one contiguous array (_gridData).
+    // _gridOffsets[i] = start index of cell i in _gridData.
+    // Cell i owns _gridData[ _gridOffsets[i] .. _gridOffsets[i+1] ).
+    std::vector<int> _gridData;      // device indices, all cells contiguous
+    std::vector<int> _gridOffsets;   // size = numCells + 1
     float _originX, _originY;                   // 版图左下角
     float _cellSize;                            // cell 边长
     int _nx, _ny;                               // grid 列数、行数
@@ -368,25 +373,46 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets) {
     _nx = (int)((width / _cellSize) + 1);
     _ny = (int)((height / _cellSize) + 1);
 
-    // 4. 建 grid，插入每个 device
-    _gridCells.resize(_nx * _ny);
+    // 4. 建 CSR grid（两遍扫描）
+    //    Pass 1: 统计每个 cell 收到多少 device index → 转为 prefix sum 得到 _gridOffsets
+    //    Pass 2: 再遍历所有 device，用 write cursor 写入 _gridData
+    int numCells = _nx * _ny;
+    _gridOffsets.assign(numCells + 1, 0);
+
+    // Pass 1: count
     for (int i = 0; i < (int)_devices.size(); ++i) {
-        int gx0 = (int)((_devices[i].llx - _originX) / _cellSize);
-        int gy0 = (int)((_devices[i].lly - _originY) / _cellSize);
-        int gx1 = (int)((_devices[i].urx - _originX) / _cellSize);
-        int gy1 = (int)((_devices[i].ury - _originY) / _cellSize);
-
-        if (gx0 < 0) gx0 = 0;
-        if (gy0 < 0) gy0 = 0;
-        if (gx1 >= _nx) gx1 = _nx - 1;
-        if (gy1 >= _ny) gy1 = _ny - 1;
-
-        for (int gy = gy0; gy <= gy1; ++gy) {
-            for (int gx = gx0; gx <= gx1; ++gx) {
-                _gridCells[_cellIndex(gx, gy)].push_back(i);
-            }
-        }
+        // ... 计算 gx0/gy0/gx1/gy1 + clamp（同前）...
+        for (int gy = gy0; gy <= gy1; ++gy)
+            for (int gx = gx0; gx <= gx1; ++gx)
+                ++_gridOffsets[_cellIndex(gx, gy)];
     }
+
+    // 转为 prefix sum
+    { int running = 0;
+      for (int c = 0; c < numCells; ++c) {
+          int count = _gridOffsets[c];
+          _gridOffsets[c] = running;
+          running += count;
+      }
+      _gridOffsets[numCells] = running;
+    }
+
+    _gridData.resize(_gridOffsets[numCells]);
+
+    // Pass 2: fill（用 _gridOffsets 作为 write cursor）
+    for (int i = 0; i < (int)_devices.size(); ++i) {
+        // ... 计算 gx0/gy0/gx1/gy1 + clamp（同前）...
+        for (int gy = gy0; gy <= gy1; ++gy)
+            for (int gx = gx0; gx <= gx1; ++gx) {
+                int ci = _cellIndex(gx, gy);
+                _gridData[_gridOffsets[ci]++] = i;
+            }
+    }
+
+    // 右移 _gridOffsets 恢复原始 prefix sum
+    for (int c = numCells; c > 0; --c)
+        _gridOffsets[c] = _gridOffsets[c - 1];
+    _gridOffsets[0] = 0;
 }
 ```
 
@@ -423,38 +449,35 @@ void SelfHeatingDevMgr::build(
 ```cpp
 void SelfHeatingDevMgr::queryOverlap(
     float llx, float lly, float urx, float ury,
-    std::vector<int>& results) const
+    std::vector<int>& results,
+    std::vector<bool>& visited) const
 {
     results.clear();
 
     int gx0 = (int)((llx - _originX) / _cellSize);
-    int gy0 = (int)((lly - _originY) / _cellSize);
-    int gx1 = (int)((urx - _originX) / _cellSize);
-    int gy1 = (int)((ury - _originY) / _cellSize);
-
-    if (gx0 < 0) gx0 = 0;
-    if (gy0 < 0) gy0 = 0;
-    if (gx1 >= _nx) gx1 = _nx - 1;
-    if (gy1 >= _ny) gy1 = _ny - 1;
+    // ... grid range + clamp 同前 ...
 
     for (int gy = gy0; gy <= gy1; ++gy) {
         for (int gx = gx0; gx <= gx1; ++gx) {
-            const std::vector<int>& cell = _gridCells[_cellIndex(gx, gy)];
-            for (size_t k = 0; k < cell.size(); ++k) {
-                int idx = cell[k];
+            int ci = _cellIndex(gx, gy);
+            // CSR access: cell ci owns _gridData[ _gridOffsets[ci] .. _gridOffsets[ci+1] )
+            for (int k = _gridOffsets[ci]; k < _gridOffsets[ci + 1]; ++k) {
+                int idx = _gridData[k];
                 const SelfHeatingDevStr& dev = _devices[idx];
-                // 精确 bbox 交叠检查
                 if (dev.urx > llx && dev.llx < urx &&
                     dev.ury > lly && dev.lly < ury) {
-                    results.push_back(idx);
+                    if (!visited[idx]) {
+                        visited[idx] = true;
+                        results.push_back(idx);
+                    }
                 }
             }
         }
     }
 
-    // 去重（同一 device 可能出现在多个 cell 中）
-    std::sort(results.begin(), results.end());
-    results.erase(std::unique(results.begin(), results.end()), results.end());
+    // 只清理本次标记的位置（通常 0-5 个）
+    for (size_t i = 0; i < results.size(); ++i)
+        visited[results[i]] = false;
 }
 ```
 
@@ -472,9 +495,11 @@ void SelfHeatingDevMgr::queryOverlap(
 - `cell_size = max(版图宽/1000, 版图高/1000)`
 - 版图范围从 SelfHeatingDevStr 的 bbox 自动推算
 
-**内存**：
-- grid cell 存储：每个 cell 一个 `std::vector<int>`（device 索引），~24 MB
-- 总内存（SelfHeatingDevStr + Grid）约 120-150 MB
+**内存**（CSR 格式）：
+- `_gridData`：~50M × 4B = ~200 MB（所有 cell 的 device 索引连续存放）
+- `_gridOffsets`：(numCells+1) × 4B ≈ 4 MB
+- 堆分配仅 2 次（`_gridData` + `_gridOffsets`），无碎片化
+- 总内存（SelfHeatingDevStr + Grid）约 300 MB
 
 ### 6.4 SelfHeatingParams — Techfile 参数
 
@@ -759,10 +784,10 @@ T_new = T_ambient + deltaT_total
 
 #### P1 — 显著影响性能
 
-- [ ] **queryOverlap() 去重改用 bitmap 替代 sort+unique**
-  - 位置：`selfHeating.cc:191-192`
-  - 问题：对 ~2.5 亿个 wire res 每个都调一次 sort+unique，即使 results 通常只有 0-5 个元素，`std::sort` 的固定开销（函数调用、分支预测等）× 2.5 亿次累积巨大
-  - 方案：维护一个 per-query 的 `vector<bool> visited`（大小 = deviceCount），用 visited 标记去重，查询结束只清本次标记的位置，不 memset 全部
+- [x] **~~queryOverlap() 去重改用 bitmap 替代 sort+unique~~**（已完成）
+  - 已将 queryOverlap 签名新增 `visited` 参数（`vector<bool>&`），调用方复用避免重复分配
+  - 在 bbox 检查通过后用 `visited[idx]` 做 O(1) 去重，查询结束只清理 results 中的标记位
+  - computeRange 中 per-thread 创建 visited（大小 = deviceCount），循环复用
 
 - [x] **~~_connectedRes 从 std::set 改为 O(1) 查找结构~~**（已完成）
   - 已改为 `std::vector<bool> _isConnected`，下标 = res 在 net 中的 offset，O(1) 查找
@@ -789,7 +814,7 @@ T_new = T_ambient + deltaT_total
 
 #### P0 — 可能导致 OOM
 
-- [ ] **init() 峰值内存：输入与内部存储同时在内存**
+- [ ] **init() 峰值内存：输入与内部存储同时在内存**（非本模块可修复，仅记录）
   - 位置：`selfHeating.cc:52`
   - 量化：
 
@@ -800,22 +825,14 @@ T_new = T_ambient + deltaT_total
     | **init() 峰值** | 两者同时存在 | **~5.0 GB** |
 
   - C++03 下 `std::string` 无 SSO 保证，50M 个 `SelfHeatingMosfet.layer_name` = 50M 次堆分配
-  - 方案：改用 callback/iterator 接口逐个拷贝；或让 init 接受 raw pointer + size + layer name 数组，避免 50M 个 string 对象
+  - 说明：输入参数 `SelfHeatingMosfet` 为当前桩实现的暂定结构，实际集成时由上层 MosfetMgr 决定接口形式和数据生命周期，非 selfheating 模块所能控制。此处仅记录潜在风险，供集成时参考
 
 #### P1 — 碎片化影响性能
 
-- [ ] **gridCells 从 vector\<vector\<int\>\> 改为 CSR 格式**
-  - 位置：`selfHeating.h:139`
-  - 量化：
-
-    | 组成 | 计算 | 大小 |
-    |------|------|------|
-    | 1M vector 对象（空壳） | 1M × 24B | 24 MB |
-    | device 索引数据 | ~50M × 4B | ~200 MB |
-    | **堆分配次数** | 1M 个 vector 各自 grow ~6 次 | **~600 万次 malloc** |
-
-  - 总大小（~224 MB）可接受，核心问题是 600 万次碎片化 malloc + 遍历时 cache miss
-  - 方案：CSR 格式——先 count pass 统计每个 cell 的 device 数，再一次性分配一个大 `vector<int>` + offset 数组。堆分配从 600 万次降为 2 次
+- [x] **~~gridCells 从 vector\<vector\<int\>\> 改为 CSR 格式~~**（已完成）
+  - 已改为 CSR 格式：`_gridData`（连续 device 索引）+ `_gridOffsets`（前缀和偏移表）
+  - init() 使用两遍扫描（count → prefix sum → fill），堆分配从 ~600 万次降为 2 次
+  - queryOverlap() 通过 `_gridOffsets[ci]..._gridOffsets[ci+1]` 范围遍历，数据连续存放，cache 友好
 
 #### P2 — emir 侧问题（供参考）
 
@@ -843,13 +860,13 @@ T_new = T_ambient + deltaT_total
 | ~~P0~~ | ~~CPU~~ | ~~debug 无条件输出~~ | ~~已修复~~ |
 | ~~P0~~ | ~~CPU~~ | ~~`_connectedRes.count` 内循环冗余~~ | ~~已修复：alpha 提到 j 循环外~~ |
 | ~~P0~~ | ~~CPU~~ | ~~compute() 内 wire res 串行~~ | ~~已修复：mtmq RD 模式并行~~ |
-| P1 | CPU | queryOverlap sort+unique | 2.5 亿次 sort 调用 |
+| ~~P1~~ | ~~CPU~~ | ~~queryOverlap sort+unique~~ | ~~已修复：bitmap 去重替代 sort+unique~~ |
 | ~~P1~~ | ~~CPU~~ | ~~`_connectedRes` 用 std::set~~ | ~~已修复：改为 vector\<bool\>~~ |
 | P1 | CPU | grid 平均 50 dev/cell | 125 亿次 bbox 比较 |
 | P2 | CPU | metal_layers string map | 7.5 亿次 string 比较 |
 | P2 | CPU | buildViaConn set 操作 | 10 亿次 O(log N) + 堆分配 |
-| P0 | 内存 | init() 峰值 | ~5 GB（可能 OOM） |
-| P1 | 内存 | gridCells 碎片化 | 600 万次 malloc |
+| P0 | 内存 | init() 峰值（非本模块可修复） | ~5 GB（上层接口决定） |
+| ~~P1~~ | ~~内存~~ | ~~gridCells 碎片化~~ | ~~已修复：CSR 格式，2 次 malloc~~ |
 | P2 | 内存 | emir 侧 500M string | ~24 GB（emir 侧） |
 | ~~P3~~ | ~~内存~~ | ~~set 树节点 per-net~~ | ~~已修复：_connectedRes 改为 vector\<bool\>~~ |
 

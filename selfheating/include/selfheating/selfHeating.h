@@ -119,9 +119,15 @@ public:
     void build(const std::map<std::string, DeviceLayerParams>& device_layers);
 
     // Find device indices whose bbox overlaps the query rectangle.
-    // Caller should reuse the results vector to avoid repeated allocation.
+    // Caller should reuse results AND visited vectors to avoid repeated allocation.
+    // visited must be sized to deviceCount() and initialized to all false.
+    //
+    // Why visited is needed: a device spanning multiple grid cells gets inserted
+    // into each cell during init(). Without dedup, the same device index would
+    // appear multiple times in results. The bitmap provides O(1) dedup per query.
     void queryOverlap(float llx, float lly, float urx, float ury,
-                      std::vector<int>& results) const;
+                      std::vector<int>& results,
+                      std::vector<bool>& visited) const;
 
     int deviceCount() const;
     const SelfHeatingDevStr& getDevice(int idx) const;
@@ -134,8 +140,23 @@ private:
     std::vector<std::string> _layerNames;       // layer_id -> layer name
     std::map<std::string, short> _layerNameToId; // layer name -> layer_id
 
-    // Uniform Grid: flat array of cell buckets, each holding device indices
-    std::vector<std::vector<int> > _gridCells;
+    // Uniform Grid — CSR (Compressed Sparse Row) format
+    //
+    // All device indices for all grid cells stored in one contiguous array
+    // (_gridData). Each cell's portion is located via _gridOffsets:
+    //   cell i owns _gridData[ _gridOffsets[i] .. _gridOffsets[i+1] )
+    //
+    // This replaces vector<vector<int>> which required ~1M independent heap
+    // allocations, causing memory fragmentation and poor cache locality
+    // during ~250M queryOverlap() calls.
+    //
+    // Memory layout example (3 cells with 2, 0, 3 devices):
+    //   _gridOffsets: [0, 2, 2, 5]   (size = numCells + 1)
+    //   _gridData:    [7, 3, 12, 0, 5]
+    //                  ^^^  ^^  ^^^^^^^
+    //                 cell0  cell1  cell2
+    std::vector<int> _gridData;      // device indices, all cells contiguous
+    std::vector<int> _gridOffsets;   // _gridOffsets[i] = start of cell i
     float _originX, _originY;   // layout lower-left corner
     float _cellSize;            // grid cell edge length
     int _nx, _ny;               // grid dimensions (columns, rows)

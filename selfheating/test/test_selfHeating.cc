@@ -149,18 +149,19 @@ static void testDevMgrQueryOverlap() {
     mgr.init(mosfets);
 
     std::vector<int> results;
+    std::vector<bool> visited(mgr.deviceCount(), false);
 
     // Query overlapping device 0 and 1
-    mgr.queryOverlap(3, 3, 12, 12, results);
+    mgr.queryOverlap(3, 3, 12, 12, results, visited);
     CHECK(results.size() == 2);
 
     // Query overlapping only device 2
-    mgr.queryOverlap(99, 99, 111, 111, results);
+    mgr.queryOverlap(99, 99, 111, 111, results, visited);
     CHECK(results.size() == 1);
     CHECK(results[0] == 2);
 
     // Query with no overlap
-    mgr.queryOverlap(50, 50, 60, 60, results);
+    mgr.queryOverlap(50, 50, 60, 60, results, visited);
     CHECK(results.size() == 0);
 }
 
@@ -478,7 +479,8 @@ static void testEmptyInput() {
     CHECK(devMgr.deviceCount() == 0);
 
     std::vector<int> results;
-    devMgr.queryOverlap(0, 0, 10, 10, results);
+    std::vector<bool> visited;
+    devMgr.queryOverlap(0, 0, 10, 10, results, visited);
     CHECK(results.size() == 0);
 
     // Empty net
