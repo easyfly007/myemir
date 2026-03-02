@@ -7,7 +7,7 @@
 // =============================================================================
 
 EmirNodeInfo::EmirNodeInfo()
-    : _x(0.0f), _y(0.0f), _type('N')
+    : _x(0.0f), _y(0.0f), _type('N'), _idx(-1)
 {}
 
 float EmirNodeInfo::x() const { return _x; }
@@ -20,6 +20,8 @@ void EmirNodeInfo::setLayer(const std::string& l) { _layer = l; }
 
 char EmirNodeInfo::type() const { return _type; }
 void EmirNodeInfo::setType(char t) { _type = t; }
+int EmirNodeInfo::idx() const { return _idx; }
+void EmirNodeInfo::setIdx(int i) { _idx = i; }
 
 // =============================================================================
 // EmirResInfo
@@ -107,6 +109,7 @@ std::vector<ResEmParam>& EmirNetInfo::resEmParams() { return _resEmParams; }
 const std::vector<ResEmParam>& EmirNetInfo::resEmParams() const { return _resEmParams; }
 
 void EmirNetInfo::addNode(EmirNodeInfo* n) {
+    n->setIdx((int)_nodes.size());
     _nodes.push_back(n);
 }
 

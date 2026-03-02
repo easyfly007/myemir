@@ -10,7 +10,6 @@
 
 #include "selfheating/selfHeating.h"
 
-#include <set>
 #include <cstdio>
 #include <ctime>
 
@@ -329,28 +328,32 @@ SelfHeatingMgr::SelfHeatingMgr(EmirNetInfo* net, int debug, int numThreads)
     : _net(net), _debug(debug), _numThreads(numThreads < 1 ? 1 : numThreads)
 {}
 
-// Build the set of wire res that are connected to MOSFET pins via one-hop
-// via traversal within the same net.
+// Build the via-connectivity flags: which wire res are connected to MOSFET
+// pins via one-hop via traversal within the same net.
 //
 // Algorithm:
 //   Pass 1: Scan all via res. If one endpoint has type 'I' (MOSFET pin),
-//           add the other endpoint to connectedNodes set.
-//   Pass 2: Scan all wire res. If either endpoint (n1/n2) is in
-//           connectedNodes, add the wire res to _connectedRes.
+//           mark the other endpoint's node index in isConnNode bitmap.
+//   Pass 2: Scan all wire res. If either endpoint (n1/n2) is marked in
+//           the bitmap, set _isConnected[i] = true.
+//
+// Uses vector<bool> indexed by node idx for O(1) lookup, replacing
+// std::set which had O(log N) per lookup with poor cache locality.
 //
 // This determines which alpha coefficient to use:
 //   connected wire res    -> alpha_connecting   (stronger coupling)
 //   non-connected wire res -> alpha_overlapping  (weaker coupling)
 void SelfHeatingMgr::buildViaConn() {
+    const std::vector<EmirNodeInfo*>& nodes = _net->nodes();
     const std::vector<EmirResInfo*>& reses = _net->reses();
     _isConnected.assign(reses.size(), false);
 
     clock_t t0 = clock();
 
-    std::set<const EmirNodeInfo*> connectedNodes;
-
-    // Pass 1: Collect nodes reachable from MOSFET pins through a single via
+    // Pass 1: Mark nodes reachable from MOSFET pins through a single via
+    std::vector<bool> isConnNode(nodes.size(), false);
     int viaCount = 0;
+    int connNodeCount = 0;
     for (size_t i = 0; i < reses.size(); ++i) {
         EmirResInfo* res = reses[i];
         if (!res->isVia()) continue;
@@ -359,13 +362,19 @@ void SelfHeatingMgr::buildViaConn() {
         const EmirNodeInfo* n1 = res->n1();
         const EmirNodeInfo* n2 = res->n2();
 
-        if (n1->type() == 'I') connectedNodes.insert(n2);
-        if (n2->type() == 'I') connectedNodes.insert(n1);
+        if (n1->type() == 'I' && !isConnNode[n2->idx()]) {
+            isConnNode[n2->idx()] = true;
+            ++connNodeCount;
+        }
+        if (n2->type() == 'I' && !isConnNode[n1->idx()]) {
+            isConnNode[n1->idx()] = true;
+            ++connNodeCount;
+        }
     }
 
     clock_t t1 = clock();
 
-    // Pass 2: Mark wire res whose endpoints touch a connected node
+    // Pass 2: Mark wire res whose endpoints touch a connected node (O(1) lookup)
     int wireCount = 0;
     int connectedCount = 0;
     for (size_t i = 0; i < reses.size(); ++i) {
@@ -373,8 +382,8 @@ void SelfHeatingMgr::buildViaConn() {
         if (res->isVia()) continue;
         ++wireCount;
 
-        if (connectedNodes.count(res->n1()) ||
-            connectedNodes.count(res->n2())) {
+        if (isConnNode[res->n1()->idx()] ||
+            isConnNode[res->n2()->idx()]) {
             _isConnected[i] = true;
             ++connectedCount;
         }
@@ -385,9 +394,9 @@ void SelfHeatingMgr::buildViaConn() {
     if (_debug >= 1) {
         double pass1_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
         double pass2_sec = (double)(t2 - t1) / CLOCKS_PER_SEC;
-        fprintf(stderr, "[SH] buildViaConn: reses=%d (via=%d wire=%d) connectedNodes=%d connectedWire=%d\n",
+        fprintf(stderr, "[SH] buildViaConn: reses=%d (via=%d wire=%d) connNodes=%d connWire=%d\n",
                 (int)reses.size(), viaCount, wireCount,
-                (int)connectedNodes.size(), connectedCount);
+                connNodeCount, connectedCount);
         fprintf(stderr, "[SH] buildViaConn: pass1=%.3fs pass2=%.3fs total=%.3fs  %s %s\n",
                 pass1_sec, pass2_sec, pass1_sec + pass2_sec,
                 getNowStr(), getRssStr());

@@ -45,10 +45,15 @@ public:
     char type() const;
     void setType(char t);
 
+    // index in EmirNetInfo::_nodes vector (set by addNode)
+    int idx() const;
+    void setIdx(int i);
+
 private:
     float _x, _y;
     std::string _layer;
     char _type;
+    int _idx;
 };
 
 // =============================================================================
