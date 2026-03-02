@@ -108,7 +108,10 @@ struct SelfHeatingParams {
 
 class SelfHeatingDevMgr {
 public:
-    SelfHeatingDevMgr(int debug = 0);
+    // Constructor.
+    //   debug: 0 = no debug output (default), >=1 = summary with timing/RSS
+    //   numThreads: 1 = serial (default), >1 = parallel via mtmq thread pool
+    SelfHeatingDevMgr(int debug = 0, int numThreads = 1);
     ~SelfHeatingDevMgr();
 
     // Phase 1: copy external MOSFET data + build Uniform Grid spatial index.
@@ -138,6 +141,7 @@ public:
 
 private:
     int _debug;                                  // debug level: 0=off, >=1=grid stats
+    int _numThreads;                             // thread count: 1=serial, >1=parallel
 
     std::vector<SelfHeatingDevStr> _devices;    // all devices, compact storage
 

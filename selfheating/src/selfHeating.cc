@@ -22,8 +22,9 @@
 // SelfHeatingDevMgr
 // =============================================================================
 
-SelfHeatingDevMgr::SelfHeatingDevMgr(int debug)
-    : _debug(debug), _originX(0.0f), _originY(0.0f), _cellSize(1.0f), _nx(0), _ny(0)
+SelfHeatingDevMgr::SelfHeatingDevMgr(int debug, int numThreads)
+    : _debug(debug), _numThreads(numThreads < 1 ? 1 : numThreads)
+    , _originX(0.0f), _originY(0.0f), _cellSize(1.0f), _nx(0), _ny(0)
 {}
 
 SelfHeatingDevMgr::~SelfHeatingDevMgr()
@@ -210,15 +211,72 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
     }
 }
 
+// Static helper: compute deltaT for devices in range [begin, end).
+// Called directly in single-threaded mode, or per-chunk in multi-threaded mode.
+// Each thread writes to disjoint _devices[i].deltaT, so no data races.
+static void buildRange(
+    size_t begin, size_t end,
+    std::vector<SelfHeatingDevStr>& devices,
+    const std::vector<const DeviceLayerParams*>& dlpTable)
+{
+    for (size_t i = begin; i < end; ++i) {
+        SelfHeatingDevStr& dev = devices[i];
+
+        const DeviceLayerParams* lp = dlpTable[dev.layer_id];
+        if (!lp) {
+            dev.deltaT = 0.0f;
+            continue;
+        }
+
+        double finger_eff = lp->finger_effect
+                            ? lp->finger_effect(dev.finger_num) : 1.0;
+        double fin_eff = lp->fin_effect
+                         ? lp->fin_effect(dev.fin_num) : 1.0;
+
+        dev.deltaT = (float)(dev.power * lp->Rth / finger_eff / fin_eff);
+    }
+}
+
+// mtmq helper types for multi-threaded build
+namespace {
+
+struct SHBuildJob {
+    size_t begin;
+    size_t end;
+};
+
+struct SHBuildArg : public EmirMtmqArg {
+    std::vector<SelfHeatingDevStr>* devices;
+    const std::vector<const DeviceLayerParams*>* dlpTable;
+};
+
+class SHBuildTask : public EmirMtmqRDtask {
+public:
+    SHBuildTask() : EmirMtmqRDtask("SHBuild") {}
+    virtual void run(void* job, EmirMtmqArg* arg) {
+        SHBuildJob* j = static_cast<SHBuildJob*>(job);
+        SHBuildArg* a = static_cast<SHBuildArg*>(arg);
+        buildRange(j->begin, j->end, *a->devices, *a->dlpTable);
+    }
+};
+
+} // anonymous namespace
+
 // Phase 2: Compute deltaT for each device.
 // Formula: deltaT = power * Rth / finger_effect / fin_effect
 // If the device layer is not found in params, deltaT is set to 0.
 //
 // Optimization: pre-build layer_id -> DeviceLayerParams* lookup table
 // so each device does O(1) array access instead of O(log M) string map find.
+// When _numThreads > 1, splits devices into chunks processed in parallel via mtmq.
 void SelfHeatingDevMgr::build(
     const std::map<std::string, DeviceLayerParams>& device_layers)
 {
+    if (_devices.empty()) return;
+
+    int numThreads = _numThreads;
+    clock_t t0 = clock();
+
     // Build layer_id -> DeviceLayerParams* table for O(1) lookup
     std::vector<const DeviceLayerParams*> dlpTable(_layerNames.size(), NULL);
     for (size_t lid = 0; lid < _layerNames.size(); ++lid) {
@@ -229,22 +287,42 @@ void SelfHeatingDevMgr::build(
         }
     }
 
-    for (int i = 0; i < (int)_devices.size(); ++i) {
-        SelfHeatingDevStr& dev = _devices[i];
+    if (numThreads <= 1) {
+        buildRange(0, _devices.size(), _devices, dlpTable);
+    } else {
+        size_t n = _devices.size();
+        size_t nThreads = (size_t)numThreads;
+        size_t chunkSize = (n + nThreads - 1) / nThreads;
 
-        const DeviceLayerParams* lp = dlpTable[dev.layer_id];
-        if (!lp) {
-            dev.deltaT = 0.0f;
-            continue;
+        std::vector<SHBuildJob> jobs(nThreads);
+        for (size_t t = 0; t < nThreads; ++t) {
+            jobs[t].begin = t * chunkSize;
+            jobs[t].end = jobs[t].begin + chunkSize;
+            if (jobs[t].end > n) jobs[t].end = n;
         }
 
-        // Apply effect functions; default to 1.0 if not specified
-        double finger_eff = lp->finger_effect
-                            ? lp->finger_effect(dev.finger_num) : 1.0;
-        double fin_eff = lp->fin_effect
-                         ? lp->fin_effect(dev.fin_num) : 1.0;
+        SHBuildArg arg;
+        arg.devices = &_devices;
+        arg.dlpTable = &dlpTable;
 
-        dev.deltaT = (float)(dev.power * lp->Rth / finger_eff / fin_eff);
+        EmirMtmqMgr mtmq(nThreads - 1);
+        for (size_t t = 0; t < nThreads; ++t) {
+            if (jobs[t].begin < jobs[t].end) {
+                mtmq.addLeafJob(&jobs[t]);
+            }
+        }
+        mtmq.setArgument(&arg);
+        mtmq.start();
+
+        SHBuildTask task;
+        mtmq.run(&task);
+    }
+
+    if (_debug >= 1) {
+        double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        fprintf(stderr, "[SH DevMgr] build: devices=%d threads=%d time=%.3fs  %s %s\n",
+                (int)_devices.size(), numThreads, sec,
+                getNowStr(), getRssStr());
     }
 }
 

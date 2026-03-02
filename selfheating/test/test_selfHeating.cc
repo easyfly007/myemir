@@ -696,6 +696,68 @@ static void testMgrComputeMultiThread() {
 }
 
 // =============================================================================
+// Test: SelfHeatingDevMgr build multi-threaded
+// =============================================================================
+
+static void testDevMgrBuildMultiThread() {
+    fprintf(stdout, "--- testDevMgrBuildMultiThread ---\n");
+
+    // Create multiple devices across two layers
+    std::vector<SelfHeatingMosfet> mosfets(4);
+
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 2.0f; mosfets[0].finger_num = 4; mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "OD";
+
+    mosfets[1].llx = 20; mosfets[1].lly = 20; mosfets[1].urx = 30; mosfets[1].ury = 30;
+    mosfets[1].power = 1.5f; mosfets[1].finger_num = 2; mosfets[1].fin_num = 6;
+    mosfets[1].layer_name = "OD";
+
+    mosfets[2].llx = 40; mosfets[2].lly = 40; mosfets[2].urx = 50; mosfets[2].ury = 50;
+    mosfets[2].power = 3.0f; mosfets[2].finger_num = 4; mosfets[2].fin_num = 8;
+    mosfets[2].layer_name = "OD";
+
+    mosfets[3].llx = 60; mosfets[3].lly = 60; mosfets[3].urx = 70; mosfets[3].ury = 70;
+    mosfets[3].power = 0.5f; mosfets[3].finger_num = 1; mosfets[3].fin_num = 10;
+    mosfets[3].layer_name = "POLY";
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    DeviceLayerParams od;
+    od.Rth = 1000.0;
+    od.finger_effect = testFingerEffect;
+    od.fin_effect = testFinEffect;
+    dlp["OD"] = od;
+
+    DeviceLayerParams poly;
+    poly.Rth = 800.0;
+    poly.finger_effect = NULL;
+    poly.fin_effect = NULL;
+    dlp["POLY"] = poly;
+
+    // Single-threaded reference (debug=0, numThreads=1)
+    SelfHeatingDevMgr mgrST(0, 1);
+    mgrST.init(mosfets, 0, 0, 70, 70);
+    mgrST.build(dlp);
+
+    // Multi-threaded (debug=0, numThreads=2)
+    SelfHeatingDevMgr mgrMT(0, 2);
+    mgrMT.init(mosfets, 0, 0, 70, 70);
+    mgrMT.build(dlp);
+
+    // Results must match exactly
+    for (int i = 0; i < 4; ++i) {
+        CHECK_NEAR(mgrMT.getDevice(i).deltaT, mgrST.getDevice(i).deltaT, 1e-6);
+    }
+
+    // Verify POLY device gets Rth=800 with default effects (1.0)
+    CHECK_NEAR(mgrST.getDevice(3).deltaT, (float)(0.5 * 800.0), 1e-3);
+
+    fprintf(stdout, "  ST vs MT deltaT: [%.4f, %.4f, %.4f, %.4f]\n",
+            mgrST.getDevice(0).deltaT, mgrST.getDevice(1).deltaT,
+            mgrST.getDevice(2).deltaT, mgrST.getDevice(3).deltaT);
+}
+
+// =============================================================================
 // main
 // =============================================================================
 
@@ -712,6 +774,7 @@ int main() {
     testEmptyInput();
     testMissingMetalLayer();
     testMgrComputeMultiThread();
+    testDevMgrBuildMultiThread();
 
     fprintf(stdout, "\n=== Results: %d passed, %d failed ===\n",
             g_testsPassed, g_testsFailed);
