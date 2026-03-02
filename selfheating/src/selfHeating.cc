@@ -12,10 +12,12 @@
 
 #include <set>
 #include <cstdio>
+#include <ctime>
 
 #include "emirMtmqMgr.h"
 #include "emirMtmqTask.h"
 #include "emirMtmqArg.h"
+#include "emirUtils.h"
 
 // =============================================================================
 // SelfHeatingDevMgr
@@ -58,6 +60,8 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
                              float bbox_llx, float bbox_lly,
                              float bbox_urx, float bbox_ury) {
     if (mosfets.empty()) return;
+
+    clock_t t0 = clock();
 
     // Step 1: Copy data to compact _devices vector
     _devices.resize(mosfets.size());
@@ -196,11 +200,14 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
                 _nx, _ny, _cellSize, numCells);
         fprintf(stderr, "[SH DevMgr] avg dev/cell=%.2f  gridData entries=%d\n",
                 avgDevPerCell, totalEntries);
+        double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
         fprintf(stderr, "[SH DevMgr] memory: devices=%.1fMB gridData=%.1fMB gridOffsets=%.1fMB total=%.1fMB\n",
                 memDevices / (1024.0 * 1024.0),
                 memGridData / (1024.0 * 1024.0),
                 memGridOffsets / (1024.0 * 1024.0),
                 memTotal / (1024.0 * 1024.0));
+        fprintf(stderr, "[SH DevMgr] init time=%.3fs  %s %s\n",
+                sec, getNowStr(), getRssStr());
     }
 }
 
@@ -338,12 +345,16 @@ void SelfHeatingMgr::buildViaConn() {
     const std::vector<EmirResInfo*>& reses = _net->reses();
     _isConnected.assign(reses.size(), false);
 
+    clock_t t0 = clock();
+
     std::set<const EmirNodeInfo*> connectedNodes;
 
     // Pass 1: Collect nodes reachable from MOSFET pins through a single via
+    int viaCount = 0;
     for (size_t i = 0; i < reses.size(); ++i) {
         EmirResInfo* res = reses[i];
         if (!res->isVia()) continue;
+        ++viaCount;
 
         const EmirNodeInfo* n1 = res->n1();
         const EmirNodeInfo* n2 = res->n2();
@@ -352,15 +363,34 @@ void SelfHeatingMgr::buildViaConn() {
         if (n2->type() == 'I') connectedNodes.insert(n1);
     }
 
+    clock_t t1 = clock();
+
     // Pass 2: Mark wire res whose endpoints touch a connected node
+    int wireCount = 0;
+    int connectedCount = 0;
     for (size_t i = 0; i < reses.size(); ++i) {
         EmirResInfo* res = reses[i];
         if (res->isVia()) continue;
+        ++wireCount;
 
         if (connectedNodes.count(res->n1()) ||
             connectedNodes.count(res->n2())) {
             _isConnected[i] = true;
+            ++connectedCount;
         }
+    }
+
+    clock_t t2 = clock();
+
+    if (_debug >= 1) {
+        double pass1_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+        double pass2_sec = (double)(t2 - t1) / CLOCKS_PER_SEC;
+        fprintf(stderr, "[SH] buildViaConn: reses=%d (via=%d wire=%d) connectedNodes=%d connectedWire=%d\n",
+                (int)reses.size(), viaCount, wireCount,
+                (int)connectedNodes.size(), connectedCount);
+        fprintf(stderr, "[SH] buildViaConn: pass1=%.3fs pass2=%.3fs total=%.3fs  %s %s\n",
+                pass1_sec, pass2_sec, pass1_sec + pass2_sec,
+                getNowStr(), getRssStr());
     }
 }
 
@@ -502,6 +532,8 @@ void SelfHeatingMgr::compute(
 
     if (reses.empty()) return;
 
+    clock_t t0 = clock();
+
     if (_numThreads <= 1) {
         // Single-threaded path
         computeRange(0, reses.size(), reses, emParams, devMgr, params,
@@ -540,5 +572,13 @@ void SelfHeatingMgr::compute(
 
         SHComputeTask task;
         mtmq.run(&task);
+    }
+
+    if (_debug >= 1) {
+        clock_t t1 = clock();
+        double sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+        fprintf(stderr, "[SH] compute: reses=%d threads=%d time=%.3fs  %s %s\n",
+                (int)reses.size(), _numThreads, sec,
+                getNowStr(), getRssStr());
     }
 }

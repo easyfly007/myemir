@@ -69,6 +69,8 @@ public:
     // layer
     const std::string& layer() const;
     void setLayer(const std::string& l);
+    int layerIdx() const;
+    void setLayerIdx(int idx);
 
     // electrical properties
     float resistance() const;
@@ -93,6 +95,7 @@ public:
 private:
     float _llx, _lly, _urx, _ury;
     std::string _layer;
+    int _layerIdx;
     float _resistance;
     float _current;
     float _avgPower;
