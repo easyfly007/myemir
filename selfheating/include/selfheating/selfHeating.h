@@ -18,7 +18,6 @@
 #include <string>
 #include <vector>
 #include <map>
-#include <set>
 #include <algorithm>
 #include <cmath>
 
@@ -158,11 +157,10 @@ private:
 
 class SelfHeatingMgr {
 public:
-    // Constructor takes the net to process and optional debug level.
-    //   0 = no debug output (default)
-    //   1 = summary per wire res (deltaT result)
-    //   2 = verbose per-device overlap details
-    SelfHeatingMgr(EmirNetInfo* net, int debug = 0);
+    // Constructor takes the net to process, optional debug level, and thread count.
+    //   debug: 0 = no debug output (default), 1 = summary, 2 = verbose
+    //   numThreads: 1 = serial (default), >1 = parallel via mtmq thread pool
+    SelfHeatingMgr(EmirNetInfo* net, int debug = 0, int numThreads = 1);
 
     // Scan via res in this net to identify wire res connected to MOSFET pins.
     // Must be called before compute().
@@ -176,7 +174,8 @@ public:
 private:
     EmirNetInfo* _net;
     int _debug;
-    std::set<const EmirResInfo*> _connectedRes; // wire res via-connected to MOSFET
+    int _numThreads;
+    std::vector<bool> _isConnected; // _isConnected[r] = true if wire res r is via-connected to MOSFET
 };
 
 #endif // SELFHEATING_H

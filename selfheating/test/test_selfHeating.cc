@@ -549,6 +549,133 @@ static void testMissingMetalLayer() {
 }
 
 // =============================================================================
+// Test: SelfHeatingMgr compute multi-threaded (same setup as end-to-end)
+// =============================================================================
+
+static void testMgrComputeMultiThread() {
+    fprintf(stdout, "--- testMgrComputeMultiThread ---\n");
+
+    // --- Setup devices (same as end-to-end) ---
+    std::vector<SelfHeatingMosfet> mosfets(1);
+    mosfets[0].llx = 0; mosfets[0].lly = 0; mosfets[0].urx = 10; mosfets[0].ury = 10;
+    mosfets[0].power = 2.0f;
+    mosfets[0].finger_num = 4;
+    mosfets[0].fin_num = 8;
+    mosfets[0].layer_name = "OD";
+
+    SelfHeatingDevMgr devMgr;
+    devMgr.init(mosfets);
+
+    std::map<std::string, DeviceLayerParams> dlp;
+    DeviceLayerParams od;
+    od.Rth = 1000.0;
+    od.finger_effect = testFingerEffect;
+    od.fin_effect = testFinEffect;
+    dlp["OD"] = od;
+    devMgr.build(dlp);
+
+    float dev_deltaT = devMgr.getDevice(0).deltaT;
+
+    // --- Setup params ---
+    SelfHeatingParams params;
+    params.K_SH_Scale = 1.5;
+    params.beta_c1 = 0.001;
+    params.beta_c2 = 0.002;
+    params.beta_c3 = 0.003;
+    params.T_ambient = 25.0;
+    params.device_layers = dlp;
+
+    MetalLayerParams m1;
+    m1.Rth = 500.0;
+    m1.alpha_connecting = 0.5;
+    m1.alpha_overlapping = 0.3;
+    params.metal_layers["M1"] = m1;
+
+    // --- Setup net (same as end-to-end) ---
+    EmirNodeInfo node_inst, node_mid, node_end, node_other, node_far;
+    node_inst.setType('I');  node_inst.setX(0);  node_inst.setY(0);
+    node_mid.setType('N');   node_mid.setX(5);   node_mid.setY(5);
+    node_end.setType('N');   node_end.setX(10);  node_end.setY(10);
+    node_other.setType('N'); node_other.setX(2);  node_other.setY(2);
+    node_far.setType('N');   node_far.setX(8);   node_far.setY(8);
+
+    EmirResInfo via_res;
+    via_res.setIsVia(true);
+    via_res.setN1(&node_inst);
+    via_res.setN2(&node_mid);
+    via_res.setLayer("VIA1");
+    via_res.setBBox(0, 0, 5, 5);
+
+    float avg_power = 0.01f;
+    float rms_power = 0.02f;
+
+    EmirResInfo wire_res_conn;
+    wire_res_conn.setIsVia(false);
+    wire_res_conn.setN1(&node_mid);
+    wire_res_conn.setN2(&node_end);
+    wire_res_conn.setLayer("M1");
+    wire_res_conn.setBBox(0, 0, 10, 10);
+    wire_res_conn.setAvgPower(avg_power);
+    wire_res_conn.setRmsPower(rms_power);
+
+    EmirResInfo wire_res_noconn;
+    wire_res_noconn.setIsVia(false);
+    wire_res_noconn.setN1(&node_other);
+    wire_res_noconn.setN2(&node_far);
+    wire_res_noconn.setLayer("M1");
+    wire_res_noconn.setBBox(0, 0, 10, 10);
+    wire_res_noconn.setAvgPower(avg_power);
+    wire_res_noconn.setRmsPower(rms_power);
+
+    EmirNetInfo net;
+    net.addNode(&node_inst);
+    net.addNode(&node_mid);
+    net.addNode(&node_end);
+    net.addNode(&node_other);
+    net.addNode(&node_far);
+    net.addRes(&via_res);
+    net.addRes(&wire_res_conn);
+    net.addRes(&wire_res_noconn);
+
+    // --- Run with numThreads=2 ---
+    SelfHeatingMgr mgr(&net, 0, 2);
+    mgr.buildViaConn();
+    mgr.compute(devMgr, params);
+
+    // --- Verify (same expected values as end-to-end) ---
+    const std::vector<ResEmParam>& emParams = net.resEmParams();
+
+    CHECK_NEAR(emParams[0]._deltaT, 0.0f, 1e-6);
+
+    double overlap_ratio_conn = 1.0;
+    double beta_conn = params.beta_c1 * dev_deltaT
+                     + params.beta_c2 * rms_power
+                     + params.beta_c3;
+    double deltaT_self_conn = m1.Rth * avg_power;
+    double deltaT_feol_conn = overlap_ratio_conn * m1.alpha_connecting * beta_conn * dev_deltaT;
+    double deltaT_total_conn = (deltaT_self_conn + deltaT_feol_conn) * params.K_SH_Scale;
+
+    CHECK_NEAR(emParams[1]._deltaT, deltaT_total_conn, 0.01);
+
+    double overlap_ratio_noconn = 1.0;
+    double beta_noconn = params.beta_c1 * dev_deltaT
+                       + params.beta_c2 * rms_power
+                       + params.beta_c3;
+    double deltaT_self_noconn = m1.Rth * avg_power;
+    double deltaT_feol_noconn = overlap_ratio_noconn * m1.alpha_overlapping * beta_noconn * dev_deltaT;
+    double deltaT_total_noconn = (deltaT_self_noconn + deltaT_feol_noconn) * params.K_SH_Scale;
+
+    CHECK_NEAR(emParams[2]._deltaT, deltaT_total_noconn, 0.01);
+
+    CHECK(emParams[1]._deltaT > emParams[2]._deltaT);
+
+    fprintf(stdout, "  [MT] wire_res_conn  deltaT = %f (expected %f)\n",
+            emParams[1]._deltaT, deltaT_total_conn);
+    fprintf(stdout, "  [MT] wire_res_noconn deltaT = %f (expected %f)\n",
+            emParams[2]._deltaT, deltaT_total_noconn);
+}
+
+// =============================================================================
 // main
 // =============================================================================
 
@@ -564,6 +691,7 @@ int main() {
     testMgrComputePartialOverlap();
     testEmptyInput();
     testMissingMetalLayer();
+    testMgrComputeMultiThread();
 
     fprintf(stdout, "\n=== Results: %d passed, %d failed ===\n",
             g_testsPassed, g_testsFailed);

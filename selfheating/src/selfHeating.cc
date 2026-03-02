@@ -10,7 +10,12 @@
 
 #include "selfheating/selfHeating.h"
 
+#include <set>
 #include <cstdio>
+
+#include "emirMtmqMgr.h"
+#include "emirMtmqTask.h"
+#include "emirMtmqArg.h"
 
 // =============================================================================
 // SelfHeatingDevMgr
@@ -217,8 +222,8 @@ const std::string& SelfHeatingDevMgr::layerName(short layer_id) const {
 //   2. compute()      - calculate deltaT for each wire res, write to ResEmParam
 // =============================================================================
 
-SelfHeatingMgr::SelfHeatingMgr(EmirNetInfo* net, int debug)
-    : _net(net), _debug(debug)
+SelfHeatingMgr::SelfHeatingMgr(EmirNetInfo* net, int debug, int numThreads)
+    : _net(net), _debug(debug), _numThreads(numThreads < 1 ? 1 : numThreads)
 {}
 
 // Build the set of wire res that are connected to MOSFET pins via one-hop
@@ -234,10 +239,10 @@ SelfHeatingMgr::SelfHeatingMgr(EmirNetInfo* net, int debug)
 //   connected wire res    -> alpha_connecting   (stronger coupling)
 //   non-connected wire res -> alpha_overlapping  (weaker coupling)
 void SelfHeatingMgr::buildViaConn() {
-    _connectedRes.clear();
+    const std::vector<EmirResInfo*>& reses = _net->reses();
+    _isConnected.assign(reses.size(), false);
 
     std::set<const EmirNodeInfo*> connectedNodes;
-    const std::vector<EmirResInfo*>& reses = _net->reses();
 
     // Pass 1: Collect nodes reachable from MOSFET pins through a single via
     for (size_t i = 0; i < reses.size(); ++i) {
@@ -258,10 +263,122 @@ void SelfHeatingMgr::buildViaConn() {
 
         if (connectedNodes.count(res->n1()) ||
             connectedNodes.count(res->n2())) {
-            _connectedRes.insert(res);
+            _isConnected[i] = true;
         }
     }
 }
+
+// Static helper: compute deltaT for wire res in range [begin, end).
+// Called directly in single-threaded mode, or per-chunk in multi-threaded mode.
+// Each invocation has its own local 'overlap' vector (per-thread when parallel).
+static void computeRange(
+    size_t begin, size_t end,
+    const std::vector<EmirResInfo*>& reses,
+    std::vector<ResEmParam>& emParams,
+    const SelfHeatingDevMgr& devMgr,
+    const SelfHeatingParams& params,
+    const std::vector<bool>& isConnected,
+    int debug, EmirNetInfo* net)
+{
+    std::vector<int> overlap;
+
+    for (size_t r = begin; r < end; ++r) {
+        EmirResInfo* res = reses[r];
+        if (res->isVia()) continue;
+
+        const std::string& wire_layer = res->layer();
+        std::map<std::string, MetalLayerParams>::const_iterator mlp_it =
+            params.metal_layers.find(wire_layer);
+        if (mlp_it == params.metal_layers.end()) continue;
+        const MetalLayerParams& mlp = mlp_it->second;
+
+        double deltaT_self = mlp.Rth * res->avgPower();
+
+        double deltaT_feol = 0.0;
+
+        double res_area = (double)(res->urx() - res->llx())
+                        * (res->ury() - res->lly());
+        if (res_area <= 0.0) continue;
+
+        if (debug >= 2) {
+            net->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
+                       r, wire_layer.c_str(),
+                       res->llx(), res->lly(), res->urx(), res->ury(), res_area);
+        }
+
+        devMgr.queryOverlap(res->llx(), res->lly(),
+                            res->urx(), res->ury(), overlap);
+
+        // Hoist alpha lookup before the device j-loop (P0 fix)
+        double alpha = isConnected[r]
+                       ? mlp.alpha_connecting
+                       : mlp.alpha_overlapping;
+
+        for (int j = 0; j < (int)overlap.size(); ++j) {
+            const SelfHeatingDevStr& dev = devMgr.getDevice(overlap[j]);
+
+            float inter_llx = (res->llx() > dev.llx) ? res->llx() : dev.llx;
+            float inter_lly = (res->lly() > dev.lly) ? res->lly() : dev.lly;
+            float inter_urx = (res->urx() < dev.urx) ? res->urx() : dev.urx;
+            float inter_ury = (res->ury() < dev.ury) ? res->ury() : dev.ury;
+            double inter_area = (double)(inter_urx - inter_llx)
+                              * (inter_ury - inter_lly);
+            double overlap_ratio = inter_area / res_area;
+
+            double beta = params.beta_c1 * dev.deltaT
+                        + params.beta_c2 * res->rmsPower()
+                        + params.beta_c3;
+
+            double contribution = overlap_ratio * alpha * beta * dev.deltaT;
+            if (debug >= 2) {
+                net->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
+                           overlap[j], overlap_ratio, alpha, beta, contribution);
+            }
+
+            deltaT_feol += contribution;
+        }
+
+        double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
+        emParams[r]._deltaT = (float)deltaT_total;
+
+        if (debug >= 1) {
+            net->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
+                       r, deltaT_self, deltaT_feol, deltaT_total);
+        }
+    }
+}
+
+// mtmq helper types for multi-threaded compute
+namespace {
+
+struct SHComputeJob {
+    size_t begin;
+    size_t end;
+};
+
+struct SHComputeArg : public EmirMtmqArg {
+    const std::vector<EmirResInfo*>* reses;
+    std::vector<ResEmParam>* emParams;
+    const SelfHeatingDevMgr* devMgr;
+    const SelfHeatingParams* params;
+    const std::vector<bool>* isConnected;
+    int debug;
+    EmirNetInfo* net;
+};
+
+class SHComputeTask : public EmirMtmqRDtask {
+public:
+    SHComputeTask() : EmirMtmqRDtask("SHCompute") {}
+    virtual void run(void* job, EmirMtmqArg* arg) {
+        SHComputeJob* j = static_cast<SHComputeJob*>(job);
+        SHComputeArg* a = static_cast<SHComputeArg*>(arg);
+        computeRange(j->begin, j->end,
+                     *a->reses, *a->emParams, *a->devMgr, *a->params,
+                     *a->isConnected, a->debug, a->net);
+    }
+};
+
+} // anonymous namespace
 
 // Compute deltaT for each wire res in this net and write to ResEmParam._deltaT.
 //
@@ -276,83 +393,55 @@ void SelfHeatingMgr::buildViaConn() {
 //
 // Wire res whose layer is not in metal_layers params are skipped (deltaT = 0).
 // Via res are skipped entirely.
+//
+// When _numThreads > 1, the res range is split into chunks and processed
+// in parallel via mtmq RD mode. Each thread writes to disjoint emParams indices.
 void SelfHeatingMgr::compute(
     const SelfHeatingDevMgr& devMgr,
     const SelfHeatingParams& params)
 {
     const std::vector<EmirResInfo*>& reses = _net->reses();
     std::vector<ResEmParam>& emParams = _net->resEmParams();
-    std::vector<int> overlap;  // reused across iterations to avoid allocation
 
-    for (size_t r = 0; r < reses.size(); ++r) {
-        EmirResInfo* res = reses[r];
-        if (res->isVia()) continue;  // skip via res
+    if (reses.empty()) return;
 
-        // Look up metal layer parameters
-        const std::string& wire_layer = res->layer();
-        std::map<std::string, MetalLayerParams>::const_iterator mlp_it =
-            params.metal_layers.find(wire_layer);
-        if (mlp_it == params.metal_layers.end()) continue;  // unknown layer, skip
-        const MetalLayerParams& mlp = mlp_it->second;
+    if (_numThreads <= 1) {
+        // Single-threaded path
+        computeRange(0, reses.size(), reses, emParams, devMgr, params,
+                     _isConnected, _debug, _net);
+    } else {
+        // Multi-threaded path via mtmq
+        size_t n = reses.size();
+        size_t nThreads = (size_t)_numThreads;
+        size_t chunkSize = (n + nThreads - 1) / nThreads;
 
-        // Step 1: Self joule heating
-        double deltaT_self = mlp.Rth * res->avgPower();
-
-        // Step 2: FEOL device thermal coupling
-        // Query all devices overlapping this wire res's bbox
-        double deltaT_feol = 0.0;
-
-        double res_area = (double)(res->urx() - res->llx())
-                        * (res->ury() - res->lly());
-        if (res_area <= 0.0) continue;  // degenerate res, skip
-
-        if (_debug >= 2) {
-            _net->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
-                        r, wire_layer.c_str(),
-                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
+        std::vector<SHComputeJob> jobs(nThreads);
+        for (size_t t = 0; t < nThreads; ++t) {
+            jobs[t].begin = t * chunkSize;
+            jobs[t].end = jobs[t].begin + chunkSize;
+            if (jobs[t].end > n) jobs[t].end = n;
         }
 
-        devMgr.queryOverlap(res->llx(), res->lly(),
-                            res->urx(), res->ury(), overlap);
+        SHComputeArg arg;
+        arg.reses = &reses;
+        arg.emParams = &emParams;
+        arg.devMgr = &devMgr;
+        arg.params = &params;
+        arg.isConnected = &_isConnected;
+        arg.debug = _debug;
+        arg.net = _net;
 
-        for (int j = 0; j < (int)overlap.size(); ++j) {
-            const SelfHeatingDevStr& dev = devMgr.getDevice(overlap[j]);
-
-            // Compute overlap area ratio between wire res and device
-            float inter_llx = (res->llx() > dev.llx) ? res->llx() : dev.llx;
-            float inter_lly = (res->lly() > dev.lly) ? res->lly() : dev.lly;
-            float inter_urx = (res->urx() < dev.urx) ? res->urx() : dev.urx;
-            float inter_ury = (res->ury() < dev.ury) ? res->ury() : dev.ury;
-            double inter_area = (double)(inter_urx - inter_llx)
-                              * (inter_ury - inter_lly);
-            double overlap_ratio = inter_area / res_area;
-
-            // Choose alpha based on via connectivity
-            double alpha = (_connectedRes.count(res))
-                           ? mlp.alpha_connecting
-                           : mlp.alpha_overlapping;
-
-            // Compute beta coupling coefficient
-            double beta = params.beta_c1 * dev.deltaT
-                        + params.beta_c2 * res->rmsPower()
-                        + params.beta_c3;
-
-            double contribution = overlap_ratio * alpha * beta * dev.deltaT;
-            if (_debug >= 2) {
-                _net->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
-                            overlap[j], overlap_ratio, alpha, beta, contribution);
+        // _numThreads-1 worker threads + main thread = _numThreads total
+        EmirMtmqMgr mtmq(nThreads - 1);
+        for (size_t t = 0; t < nThreads; ++t) {
+            if (jobs[t].begin < jobs[t].end) {
+                mtmq.addLeafJob(&jobs[t]);
             }
-
-            deltaT_feol += contribution;
         }
+        mtmq.setArgument(&arg);
+        mtmq.start();
 
-        // Step 3: Apply global scale and write result
-        double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
-        emParams[r]._deltaT = (float)deltaT_total;
-
-        if (_debug >= 1) {
-            _net->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
-                        r, deltaT_self, deltaT_feol, deltaT_total);
-        }
+        SHComputeTask task;
+        mtmq.run(&task);
     }
 }
