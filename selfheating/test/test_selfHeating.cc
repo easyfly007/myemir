@@ -1,4 +1,4 @@
-#include "selfheating/selfHeating.h"
+#include "../../plsi/selfHeating.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -750,7 +750,7 @@ static void testDevMgrBuildMultiThread() {
     }
 
     // Verify POLY device gets Rth=800 with default effects (1.0)
-    CHECK_NEAR(mgrST.getDevice(3).deltaT, (float)(0.5 * 800.0), 1e-3);
+    CHECK_NEAR(mgrST.getDevice(3).deltaT, static_cast<float>(0.5 * 800.0), 1e-3);
 
     fprintf(stdout, "  ST vs MT deltaT: [%.4f, %.4f, %.4f, %.4f]\n",
             mgrST.getDevice(0).deltaT, mgrST.getDevice(1).deltaT,

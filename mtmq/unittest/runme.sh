@@ -14,11 +14,11 @@ NC='\033[0m' # No Color
 
 # Compiler and flags
 CXX=g++
-CXXFLAGS="-std=c++98 -Wall -Wextra -O2 -pthread -I.."
+CXXFLAGS="-std=c++98 -Wall -Wextra -O2 -pthread"
 TARGET=test_mtmqMgr
 
-# Source files from parent directory
-PARENT_SOURCES="../emirMtmqMgr.cc ../emirMtmqTask.cc ../emirMtmqDebug.cc"
+# Source files from plsi directory
+PARENT_SOURCES="../../plsi/emirMtmqMgr.cc ../../plsi/emirMtmqTask.cc ../../plsi/emirMtmqDebug.cc"
 
 # Test source file in current directory
 TEST_SOURCE="test_mtmqMgr.cc"

@@ -6,8 +6,8 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <string>
-#include "emirMtmqMgr.h"
-#include "emirMtmqArg.h"
+#include "../../plsi/emirMtmqMgr.h"
+#include "../../plsi/emirMtmqArg.h"
 
 // Global variables for recording execution order and results
 std::vector<int> execution_order;
@@ -797,7 +797,7 @@ int main() {
         test_multiple_runs();
         
         std::cout << "\n========================================" << std::endl;
-        std::cout << "    All tests passed! 鉁? << std::endl;
+        std::cout << "    All tests passed!" << std::endl;
         std::cout << "========================================" << std::endl;
         
         return 0;

@@ -8,7 +8,7 @@
 //   SelfHeatingDevMgr - manages MOSFET data with Uniform Grid spatial index
 //   SelfHeatingMgr    - per-net processor for wire res deltaT computation
 
-#include "selfheating/selfHeating.h"
+#include "selfHeating.h"
 
 #include <cstdio>
 #include <ctime>
@@ -37,7 +37,7 @@ short SelfHeatingDevMgr::_getOrCreateLayerId(const std::string& name) {
     if (it != _layerNameToId.end()) {
         return it->second;
     }
-    short id = (short)_layerNames.size();
+    short id = static_cast<short>(_layerNames.size());
     _layerNames.push_back(name);
     _layerNameToId[name] = id;
     return id;
@@ -88,17 +88,17 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
     float height = bbox_ury - bbox_lly;
     float area = width * height;
 
-    int num_devices = (int)_devices.size();
+    int num_devices = static_cast<int>(_devices.size());
     int target_avg = 8;
     int target_cells = num_devices / target_avg;
     if (target_cells < 100) target_cells = 100;           // floor ~10x10
     if (target_cells > 25000000) target_cells = 25000000;  // cap ~5000x5000
 
-    _cellSize = (float)sqrt((double)area / target_cells);
+    _cellSize = static_cast<float>(sqrt(static_cast<double>(area) / target_cells));
     if (_cellSize <= 0.0f) _cellSize = 1.0f;
 
-    _nx = (int)((width / _cellSize) + 1);
-    _ny = (int)((height / _cellSize) + 1);
+    _nx = static_cast<int>((width / _cellSize) + 1);
+    _ny = static_cast<int>((height / _cellSize) + 1);
 
     // Step 4: Build CSR (Compressed Sparse Row) grid — two-pass algorithm
     //
@@ -117,11 +117,11 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
     _gridOffsets.assign(numCells + 1, 0);
 
     // --- Pass 1: count entries per cell ---
-    for (int i = 0; i < (int)_devices.size(); ++i) {
-        int gx0 = (int)((_devices[i].llx - _originX) / _cellSize);
-        int gy0 = (int)((_devices[i].lly - _originY) / _cellSize);
-        int gx1 = (int)((_devices[i].urx - _originX) / _cellSize);
-        int gy1 = (int)((_devices[i].ury - _originY) / _cellSize);
+    for (int i = 0; i < static_cast<int>(_devices.size()); ++i) {
+        int gx0 = static_cast<int>((_devices[i].llx - _originX) / _cellSize);
+        int gy0 = static_cast<int>((_devices[i].lly - _originY) / _cellSize);
+        int gx1 = static_cast<int>((_devices[i].urx - _originX) / _cellSize);
+        int gy1 = static_cast<int>((_devices[i].ury - _originY) / _cellSize);
 
         if (gx0 < 0) gx0 = 0;
         if (gy0 < 0) gy0 = 0;
@@ -155,11 +155,11 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
     // We use _gridOffsets as write cursors: _gridOffsets[c] points to the
     // next write position for cell c. After filling, each _gridOffsets[c]
     // equals the original _gridOffsets[c+1], so we shift right to restore.
-    for (int i = 0; i < (int)_devices.size(); ++i) {
-        int gx0 = (int)((_devices[i].llx - _originX) / _cellSize);
-        int gy0 = (int)((_devices[i].lly - _originY) / _cellSize);
-        int gx1 = (int)((_devices[i].urx - _originX) / _cellSize);
-        int gy1 = (int)((_devices[i].ury - _originY) / _cellSize);
+    for (int i = 0; i < static_cast<int>(_devices.size()); ++i) {
+        int gx0 = static_cast<int>((_devices[i].llx - _originX) / _cellSize);
+        int gy0 = static_cast<int>((_devices[i].lly - _originY) / _cellSize);
+        int gx1 = static_cast<int>((_devices[i].urx - _originX) / _cellSize);
+        int gy1 = static_cast<int>((_devices[i].ury - _originY) / _cellSize);
 
         if (gx0 < 0) gx0 = 0;
         if (gy0 < 0) gy0 = 0;
@@ -187,11 +187,11 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
     if (_debug >= 1) {
         int totalEntries = _gridOffsets[numCells];
         double avgDevPerCell = (numCells > 0)
-            ? (double)totalEntries / numCells : 0.0;
+            ? static_cast<double>(totalEntries) / numCells : 0.0;
         // Memory: _devices (32B each) + _gridData (4B each) + _gridOffsets (4B each)
-        double memDevices = (double)_devices.size() * 32.0;
-        double memGridData = (double)_gridData.size() * 4.0;
-        double memGridOffsets = (double)_gridOffsets.size() * 4.0;
+        double memDevices = static_cast<double>(_devices.size()) * 32.0;
+        double memGridData = static_cast<double>(_gridData.size()) * 4.0;
+        double memGridOffsets = static_cast<double>(_gridOffsets.size()) * 4.0;
         double memTotal = memDevices + memGridData + memGridOffsets;
 
         fprintf(stderr, "[SH DevMgr] devices=%d  bbox=(%.4f,%.4f)-(%.4f,%.4f)\n",
@@ -200,7 +200,7 @@ void SelfHeatingDevMgr::init(const std::vector<SelfHeatingMosfet>& mosfets,
                 _nx, _ny, _cellSize, numCells);
         fprintf(stderr, "[SH DevMgr] avg dev/cell=%.2f  gridData entries=%d\n",
                 avgDevPerCell, totalEntries);
-        double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        double sec = static_cast<double>(clock() - t0) / CLOCKS_PER_SEC;
         fprintf(stderr, "[SH DevMgr] memory: devices=%.1fMB gridData=%.1fMB gridOffsets=%.1fMB total=%.1fMB\n",
                 memDevices / (1024.0 * 1024.0),
                 memGridData / (1024.0 * 1024.0),
@@ -233,7 +233,7 @@ static void buildRange(
         double fin_eff = lp->fin_effect
                          ? lp->fin_effect(dev.fin_num) : 1.0;
 
-        dev.deltaT = (float)(dev.power * lp->Rth / finger_eff / fin_eff);
+        dev.deltaT = static_cast<float>(dev.power * lp->Rth / finger_eff / fin_eff);
     }
 }
 
@@ -291,7 +291,7 @@ void SelfHeatingDevMgr::build(
         buildRange(0, _devices.size(), _devices, dlpTable);
     } else {
         size_t n = _devices.size();
-        size_t nThreads = (size_t)numThreads;
+        size_t nThreads = static_cast<size_t>(numThreads);
         size_t chunkSize = (n + nThreads - 1) / nThreads;
 
         std::vector<SHBuildJob> jobs(nThreads);
@@ -319,9 +319,9 @@ void SelfHeatingDevMgr::build(
     }
 
     if (_debug >= 1) {
-        double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
+        double sec = static_cast<double>(clock() - t0) / CLOCKS_PER_SEC;
         fprintf(stderr, "[SH DevMgr] build: devices=%d threads=%d time=%.3fs  %s %s\n",
-                (int)_devices.size(), numThreads, sec,
+                static_cast<int>(_devices.size()), numThreads, sec,
                 getNowStr(), getRssStr());
     }
 }
@@ -350,10 +350,10 @@ void SelfHeatingDevMgr::queryOverlap(
     if (_nx == 0 || _ny == 0) return;
 
     // Map query bbox to grid cell range
-    int gx0 = (int)((llx - _originX) / _cellSize);
-    int gy0 = (int)((lly - _originY) / _cellSize);
-    int gx1 = (int)((urx - _originX) / _cellSize);
-    int gy1 = (int)((ury - _originY) / _cellSize);
+    int gx0 = static_cast<int>((llx - _originX) / _cellSize);
+    int gy0 = static_cast<int>((lly - _originY) / _cellSize);
+    int gx1 = static_cast<int>((urx - _originX) / _cellSize);
+    int gy1 = static_cast<int>((ury - _originY) / _cellSize);
 
     // Clamp to grid bounds
     if (gx0 < 0) gx0 = 0;
@@ -388,7 +388,7 @@ void SelfHeatingDevMgr::queryOverlap(
 }
 
 int SelfHeatingDevMgr::deviceCount() const {
-    return (int)_devices.size();
+    return static_cast<int>(_devices.size());
 }
 
 const SelfHeatingDevStr& SelfHeatingDevMgr::getDevice(int idx) const {
@@ -480,10 +480,10 @@ void SelfHeatingMgr::buildViaConn() {
     clock_t t2 = clock();
 
     if (_debug >= 1) {
-        double pass1_sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
-        double pass2_sec = (double)(t2 - t1) / CLOCKS_PER_SEC;
+        double pass1_sec = static_cast<double>(t1 - t0) / CLOCKS_PER_SEC;
+        double pass2_sec = static_cast<double>(t2 - t1) / CLOCKS_PER_SEC;
         fprintf(stderr, "[SH] buildViaConn: reses=%d (via=%d wire=%d) connNodes=%d connWire=%d\n",
-                (int)reses.size(), viaCount, wireCount,
+                static_cast<int>(reses.size()), viaCount, wireCount,
                 connNodeCount, connectedCount);
         fprintf(stderr, "[SH] buildViaConn: pass1=%.3fs pass2=%.3fs total=%.3fs  %s %s\n",
                 pass1_sec, pass2_sec, pass1_sec + pass2_sec,
@@ -519,19 +519,19 @@ static void computeRange(
 
         // O(1) layer params lookup via layerIdx (replaces string map find)
         int lidx = res->layerIdx();
-        if (lidx < 0 || lidx >= (int)mlpTable.size() || !mlpTable[lidx]) continue;
+        if (lidx < 0 || lidx >= static_cast<int>(mlpTable.size()) || !mlpTable[lidx]) continue;
         const MetalLayerParams& mlp = *mlpTable[lidx];
 
         double deltaT_self = mlp.Rth * res->avgPower();
 
         double deltaT_feol = 0.0;
 
-        double res_area = (double)(res->urx() - res->llx())
+        double res_area = static_cast<double>(res->urx() - res->llx())
                         * (res->ury() - res->lly());
         if (res_area <= 0.0) continue;
 
         if (debug >= 2) {
-            net->mgr()->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
+            net->_mgr()->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
                        r, res->layer().c_str(),
                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
         }
@@ -546,14 +546,14 @@ static void computeRange(
         double rms_power = res->rmsPower();
         double beta_c2_rms = beta_c2 * rms_power;
 
-        for (int j = 0; j < (int)overlap.size(); ++j) {
+        for (int j = 0; j < static_cast<int>(overlap.size()); ++j) {
             const SelfHeatingDevStr& dev = devMgr.getDevice(overlap[j]);
 
             float inter_llx = (res->llx() > dev.llx) ? res->llx() : dev.llx;
             float inter_lly = (res->lly() > dev.lly) ? res->lly() : dev.lly;
             float inter_urx = (res->urx() < dev.urx) ? res->urx() : dev.urx;
             float inter_ury = (res->ury() < dev.ury) ? res->ury() : dev.ury;
-            double inter_area = (double)(inter_urx - inter_llx)
+            double inter_area = static_cast<double>(inter_urx - inter_llx)
                               * (inter_ury - inter_lly);
             double overlap_ratio = inter_area / res_area;
 
@@ -563,7 +563,7 @@ static void computeRange(
 
             double contribution = overlap_ratio * alpha * beta * dev.deltaT;
             if (debug >= 2) {
-                net->mgr()->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
+                net->_mgr()->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
                            overlap[j], overlap_ratio, alpha, beta, contribution);
             }
 
@@ -571,10 +571,10 @@ static void computeRange(
         }
 
         double deltaT_total = (deltaT_self + deltaT_feol) * K_SH_Scale;
-        emParams[r]._deltaT = (float)deltaT_total;
+        emParams[r]._deltaT = static_cast<float>(deltaT_total);
 
         if (debug >= 1) {
-            net->mgr()->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
+            net->_mgr()->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
                        r, deltaT_self, deltaT_feol, deltaT_total);
         }
     }
@@ -679,7 +679,7 @@ void SelfHeatingMgr::compute(
     } else {
         // Multi-threaded path via mtmq
         size_t n = reses.size();
-        size_t nThreads = (size_t)_numThreads;
+        size_t nThreads = static_cast<size_t>(_numThreads);
         size_t chunkSize = (n + nThreads - 1) / nThreads;
 
         std::vector<SHComputeJob> jobs(nThreads);
@@ -715,9 +715,9 @@ void SelfHeatingMgr::compute(
 
     if (_debug >= 1) {
         clock_t t1 = clock();
-        double sec = (double)(t1 - t0) / CLOCKS_PER_SEC;
+        double sec = static_cast<double>(t1 - t0) / CLOCKS_PER_SEC;
         fprintf(stderr, "[SH] compute: reses=%d threads=%d time=%.3fs  %s %s\n",
-                (int)reses.size(), _numThreads, sec,
+                static_cast<int>(reses.size()), _numThreads, sec,
                 getNowStr(), getRssStr());
     }
 }

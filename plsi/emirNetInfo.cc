@@ -1,4 +1,4 @@
-#include "selfheating/emirNetInfo.h"
+#include "emirNetInfo.h"
 #include <cstdarg>
 #include <cstdio>
 
@@ -94,14 +94,14 @@ void EmirInfoMgr::debug(const char* fmt, ...) const {
 // =============================================================================
 
 EmirNetInfo::EmirNetInfo()
-    : _mgr(NULL)
+    : _mgrData(NULL)
 {}
 
 EmirNetInfo::~EmirNetInfo()
 {}
 
-EmirInfoMgr* EmirNetInfo::mgr() const { return _mgr; }
-void EmirNetInfo::setMgr(EmirInfoMgr* m) { _mgr = m; }
+EmirInfoMgr* EmirNetInfo::_mgr() const { return _mgrData; }
+void EmirNetInfo::setMgr(EmirInfoMgr* m) { _mgrData = m; }
 
 const std::vector<EmirNodeInfo*>& EmirNetInfo::nodes() const { return _nodes; }
 const std::vector<EmirResInfo*>& EmirNetInfo::reses() const { return _reses; }
@@ -109,7 +109,7 @@ std::vector<ResEmParam>& EmirNetInfo::resEmParams() { return _resEmParams; }
 const std::vector<ResEmParam>& EmirNetInfo::resEmParams() const { return _resEmParams; }
 
 void EmirNetInfo::addNode(EmirNodeInfo* n) {
-    n->setIdx((int)_nodes.size());
+    n->setIdx(static_cast<int>(_nodes.size()));
     _nodes.push_back(n);
 }
 
