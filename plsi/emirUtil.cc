@@ -1,9 +1,9 @@
-// emirUtils.cc
+// emirUtil.cc
 //
 // Lightweight debug helpers for emir modules.
 // C++03 compatible.
 
-#include "emirUtils.h"
+#include "emirUtil.h"
 
 #include <cstdio>
 #include <ctime>

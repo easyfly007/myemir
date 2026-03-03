@@ -19,8 +19,8 @@ public:
     const std::string& layer() const;
     void setLayer(const std::string& l);
 
-    // 'I' = instance/MOSFET pin, 'N' = normal node, etc.
-    char type() const;
+    // 'I' = MOSFET pin, 'S' = supply, 'P' = port
+    char ctype() const;
     void setType(char t);
 
     // index in EmirNetInfo::_nodes vector (set by addNode)

@@ -183,19 +183,28 @@ static void testMgrBuildViaConn() {
     node_other.setType('N'); node_other.setX(50); node_other.setY(50);
     node_far.setType('N');  node_far.setX(60); node_far.setY(60);
 
+    EmirInfoMgr infoMgr;
+    EmirNetInfo net;
+    net.setMgr(&infoMgr);
+    net.addNode(&node_inst);   // idx 0
+    net.addNode(&node_mid);    // idx 1
+    net.addNode(&node_end);    // idx 2
+    net.addNode(&node_other);  // idx 3
+    net.addNode(&node_far);    // idx 4
+
     // via res: node_inst -> node_mid
     EmirResInfo via_res;
     via_res.setIsVia(true);
-    via_res.setN1(&node_inst);
-    via_res.setN2(&node_mid);
+    via_res._n1 = node_inst.idx();
+    via_res._n2 = node_mid.idx();
     via_res.setLayer("VIA1");
     via_res.setBBox(0, 0, 5, 5);
 
     // wire_res_0: node_mid -> node_end (should be connected)
     EmirResInfo wire_res_0;
     wire_res_0.setIsVia(false);
-    wire_res_0.setN1(&node_mid);
-    wire_res_0.setN2(&node_end);
+    wire_res_0._n1 = node_mid.idx();
+    wire_res_0._n2 = node_end.idx();
     wire_res_0.setLayer("M1");
     wire_res_0.setLayerIdx(0);
     wire_res_0.setBBox(0, 0, 10, 10);
@@ -205,22 +214,14 @@ static void testMgrBuildViaConn() {
     // wire_res_1: node_other -> node_far (not connected)
     EmirResInfo wire_res_1;
     wire_res_1.setIsVia(false);
-    wire_res_1.setN1(&node_other);
-    wire_res_1.setN2(&node_far);
+    wire_res_1._n1 = node_other.idx();
+    wire_res_1._n2 = node_far.idx();
     wire_res_1.setLayer("M1");
     wire_res_1.setLayerIdx(0);
     wire_res_1.setBBox(50, 50, 60, 60);
     wire_res_1.setAvgPower(0.01f);
     wire_res_1.setRmsPower(0.02f);
 
-    EmirInfoMgr infoMgr;
-    EmirNetInfo net;
-    net.setMgr(&infoMgr);
-    net.addNode(&node_inst);
-    net.addNode(&node_mid);
-    net.addNode(&node_end);
-    net.addNode(&node_other);
-    net.addNode(&node_far);
     net.addRes(&via_res);
     net.addRes(&wire_res_0);
     net.addRes(&wire_res_1);
@@ -292,10 +293,19 @@ static void testMgrComputeEndToEnd() {
     node_other.setType('N'); node_other.setX(2);  node_other.setY(2);
     node_far.setType('N');   node_far.setX(8);   node_far.setY(8);
 
+    EmirInfoMgr infoMgr;
+    EmirNetInfo net;
+    net.setMgr(&infoMgr);
+    net.addNode(&node_inst);   // idx 0
+    net.addNode(&node_mid);    // idx 1
+    net.addNode(&node_end);    // idx 2
+    net.addNode(&node_other);  // idx 3
+    net.addNode(&node_far);    // idx 4
+
     EmirResInfo via_res;
     via_res.setIsVia(true);
-    via_res.setN1(&node_inst);
-    via_res.setN2(&node_mid);
+    via_res._n1 = node_inst.idx();
+    via_res._n2 = node_mid.idx();
     via_res.setLayer("VIA1");
     via_res.setBBox(0, 0, 5, 5);
 
@@ -305,8 +315,8 @@ static void testMgrComputeEndToEnd() {
     // wire_res_conn: connected to MOSFET via via -> alpha_connecting
     EmirResInfo wire_res_conn;
     wire_res_conn.setIsVia(false);
-    wire_res_conn.setN1(&node_mid);
-    wire_res_conn.setN2(&node_end);
+    wire_res_conn._n1 = node_mid.idx();
+    wire_res_conn._n2 = node_end.idx();
     wire_res_conn.setLayer("M1");
     wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
@@ -316,24 +326,16 @@ static void testMgrComputeEndToEnd() {
     // wire_res_noconn: not connected -> alpha_overlapping
     EmirResInfo wire_res_noconn;
     wire_res_noconn.setIsVia(false);
-    wire_res_noconn.setN1(&node_other);
-    wire_res_noconn.setN2(&node_far);
+    wire_res_noconn._n1 = node_other.idx();
+    wire_res_noconn._n2 = node_far.idx();
     wire_res_noconn.setLayer("M1");
     wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
     wire_res_noconn.setAvgPower(avg_power);
     wire_res_noconn.setRmsPower(rms_power);
 
-    EmirInfoMgr infoMgr;
-    EmirNetInfo net;
-    net.setMgr(&infoMgr);
-    net.addNode(&node_inst);
-    net.addNode(&node_mid);
-    net.addNode(&node_end);
-    net.addNode(&node_other);
-    net.addNode(&node_far);
-    net.addRes(&via_res);       // index 0
-    net.addRes(&wire_res_conn); // index 1
+    net.addRes(&via_res);         // index 0
+    net.addRes(&wire_res_conn);   // index 1
     net.addRes(&wire_res_noconn); // index 2
 
     // --- Run ---
@@ -430,10 +432,16 @@ static void testMgrComputePartialOverlap() {
     n1.setType('N'); n1.setX(5);  n1.setY(0);
     n2.setType('N'); n2.setX(20); n2.setY(10);
 
+    EmirInfoMgr infoMgr;
+    EmirNetInfo net;
+    net.setMgr(&infoMgr);
+    net.addNode(&n1);  // idx 0
+    net.addNode(&n2);  // idx 1
+
     EmirResInfo wire_res;
     wire_res.setIsVia(false);
-    wire_res.setN1(&n1);
-    wire_res.setN2(&n2);
+    wire_res._n1 = n1.idx();
+    wire_res._n2 = n2.idx();
     wire_res.setLayer("M1");
     wire_res.setLayerIdx(0);
     wire_res.setBBox(5, 0, 20, 10);
@@ -442,11 +450,6 @@ static void testMgrComputePartialOverlap() {
     wire_res.setAvgPower(avg_power);
     wire_res.setRmsPower(rms_power);
 
-    EmirInfoMgr infoMgr;
-    EmirNetInfo net;
-    net.setMgr(&infoMgr);
-    net.addNode(&n1);
-    net.addNode(&n2);
     net.addRes(&wire_res);
 
     SelfHeatingMgr mgr(&net);
@@ -541,21 +544,22 @@ static void testMissingMetalLayer() {
     n1.setType('N'); n1.setX(0); n1.setY(0);
     n2.setType('N'); n2.setX(10); n2.setY(10);
 
+    EmirInfoMgr infoMgr;
+    EmirNetInfo net;
+    net.setMgr(&infoMgr);
+    net.addNode(&n1);  // idx 0
+    net.addNode(&n2);  // idx 1
+
     EmirResInfo wire_res;
     wire_res.setIsVia(false);
-    wire_res.setN1(&n1);
-    wire_res.setN2(&n2);
+    wire_res._n1 = n1.idx();
+    wire_res._n2 = n2.idx();
     wire_res.setLayer("M2");  // not in params
     wire_res.setLayerIdx(1);
     wire_res.setBBox(0, 0, 10, 10);
     wire_res.setAvgPower(0.01f);
     wire_res.setRmsPower(0.02f);
 
-    EmirInfoMgr infoMgr;
-    EmirNetInfo net;
-    net.setMgr(&infoMgr);
-    net.addNode(&n1);
-    net.addNode(&n2);
     net.addRes(&wire_res);
 
     SelfHeatingMgr mgr(&net);
@@ -617,10 +621,17 @@ static void testMgrComputeMultiThread() {
     node_other.setType('N'); node_other.setX(2);  node_other.setY(2);
     node_far.setType('N');   node_far.setX(8);   node_far.setY(8);
 
+    EmirNetInfo net;
+    net.addNode(&node_inst);   // idx 0
+    net.addNode(&node_mid);    // idx 1
+    net.addNode(&node_end);    // idx 2
+    net.addNode(&node_other);  // idx 3
+    net.addNode(&node_far);    // idx 4
+
     EmirResInfo via_res;
     via_res.setIsVia(true);
-    via_res.setN1(&node_inst);
-    via_res.setN2(&node_mid);
+    via_res._n1 = node_inst.idx();
+    via_res._n2 = node_mid.idx();
     via_res.setLayer("VIA1");
     via_res.setBBox(0, 0, 5, 5);
 
@@ -629,8 +640,8 @@ static void testMgrComputeMultiThread() {
 
     EmirResInfo wire_res_conn;
     wire_res_conn.setIsVia(false);
-    wire_res_conn.setN1(&node_mid);
-    wire_res_conn.setN2(&node_end);
+    wire_res_conn._n1 = node_mid.idx();
+    wire_res_conn._n2 = node_end.idx();
     wire_res_conn.setLayer("M1");
     wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
@@ -639,20 +650,14 @@ static void testMgrComputeMultiThread() {
 
     EmirResInfo wire_res_noconn;
     wire_res_noconn.setIsVia(false);
-    wire_res_noconn.setN1(&node_other);
-    wire_res_noconn.setN2(&node_far);
+    wire_res_noconn._n1 = node_other.idx();
+    wire_res_noconn._n2 = node_far.idx();
     wire_res_noconn.setLayer("M1");
     wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
     wire_res_noconn.setAvgPower(avg_power);
     wire_res_noconn.setRmsPower(rms_power);
 
-    EmirNetInfo net;
-    net.addNode(&node_inst);
-    net.addNode(&node_mid);
-    net.addNode(&node_end);
-    net.addNode(&node_other);
-    net.addNode(&node_far);
     net.addRes(&via_res);
     net.addRes(&wire_res_conn);
     net.addRes(&wire_res_noconn);

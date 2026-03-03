@@ -1,4 +1,4 @@
-// emirUtils.h
+// emirUtil.h
 //
 // Lightweight debug helpers for emir modules.
 // All functions return pointers to internal static buffers —

@@ -16,7 +16,7 @@
 #include "emirMtmqMgr.h"
 #include "emirMtmqTask.h"
 #include "emirMtmqArg.h"
-#include "emirUtils.h"
+#include "emirUtil.h"
 
 // =============================================================================
 // SelfHeatingDevMgr
@@ -447,15 +447,15 @@ void SelfHeatingMgr::buildViaConn() {
         if (!res->isVia()) continue;
         ++viaCount;
 
-        const EmirNodeInfo* n1 = res->n1();
-        const EmirNodeInfo* n2 = res->n2();
+        int n1idx = res->n1();
+        int n2idx = res->n2();
 
-        if (n1->type() == 'I' && !isConnNode[n2->idx()]) {
-            isConnNode[n2->idx()] = true;
+        if (nodes[n1idx]->ctype() == 'I' && !isConnNode[n2idx]) {
+            isConnNode[n2idx] = true;
             ++connNodeCount;
         }
-        if (n2->type() == 'I' && !isConnNode[n1->idx()]) {
-            isConnNode[n1->idx()] = true;
+        if (nodes[n2idx]->ctype() == 'I' && !isConnNode[n1idx]) {
+            isConnNode[n1idx] = true;
             ++connNodeCount;
         }
     }
@@ -470,8 +470,8 @@ void SelfHeatingMgr::buildViaConn() {
         if (res->isVia()) continue;
         ++wireCount;
 
-        if (isConnNode[res->n1()->idx()] ||
-            isConnNode[res->n2()->idx()]) {
+        if (isConnNode[res->n1()] ||
+            isConnNode[res->n2()]) {
             _isConnected[i] = true;
             ++connectedCount;
         }

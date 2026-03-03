@@ -4,8 +4,6 @@
 #include <string>
 #include <limits>
 
-#include "emirNodeInfo.h"
-
 // =============================================================================
 // ResEmParam — EM parameters per res
 // =============================================================================
@@ -51,15 +49,16 @@ public:
     float rmsPower() const;
     void setRmsPower(float v);
 
-    // connected nodes
-    EmirNodeInfo* n1() const;
-    EmirNodeInfo* n2() const;
-    void setN1(EmirNodeInfo* n);
-    void setN2(EmirNodeInfo* n);
-
     // via or wire
     bool isVia() const;
     void setIsVia(bool v);
+
+    // connected node indices (offsets into EmirNetInfo::_nodes)
+    int n1() const;
+    int n2() const;
+
+    int _n1;  // index into EmirNetInfo::_nodes
+    int _n2;  // index into EmirNetInfo::_nodes
 
 private:
     float _llx, _lly, _urx, _ury;
@@ -69,8 +68,6 @@ private:
     float _current;
     float _avgPower;
     float _rmsPower;
-    EmirNodeInfo* _n1;
-    EmirNodeInfo* _n2;
     bool _isVia;
 };
 
