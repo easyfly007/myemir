@@ -403,6 +403,14 @@ const std::string& SelfHeatingDevMgr::layerName(short layer_id) const {
     return _layerNames[layer_id];
 }
 
+// File-local helper: check if a res belongs to a via layer.
+static bool resIsVia(const EmirResInfo* res, const EmirInfoMgr* mgr) {
+    int lidx = res->layerIdx();
+    const std::vector<EmirLayerInfo*>& ls = mgr->layers();
+    return lidx >= 0 && lidx < static_cast<int>(ls.size())
+           && ls[lidx] && ls[lidx]->isViaLayer();
+}
+
 // =============================================================================
 // SelfHeatingMgr — per-net wire res processor
 //
@@ -444,7 +452,7 @@ void SelfHeatingMgr::buildViaConn() {
     int connNodeCount = 0;
     for (size_t i = 0; i < reses.size(); ++i) {
         EmirResInfo* res = reses[i];
-        if (!res->isVia()) continue;
+        if (!resIsVia(res, _net->_mgr)) continue;
         ++viaCount;
 
         int n1idx = res->n1();
@@ -467,7 +475,7 @@ void SelfHeatingMgr::buildViaConn() {
     int connectedCount = 0;
     for (size_t i = 0; i < reses.size(); ++i) {
         EmirResInfo* res = reses[i];
-        if (res->isVia()) continue;
+        if (resIsVia(res, _net->_mgr)) continue;
         ++wireCount;
 
         if (isConnNode[res->n1()] ||
@@ -515,7 +523,7 @@ static void computeRange(
 
     for (size_t r = begin; r < end; ++r) {
         EmirResInfo* res = reses[r];
-        if (res->isVia()) continue;
+        if (resIsVia(res, net->_mgr)) continue;
 
         // O(1) layer params lookup via layerIdx (replaces string map find)
         int lidx = res->layerIdx();
@@ -531,7 +539,7 @@ static void computeRange(
         if (res_area <= 0.0) continue;
 
         if (debug >= 2) {
-            net->_mgr()->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
+            net->_mgr->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
                        r, res->layer().c_str(),
                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
         }
@@ -563,7 +571,7 @@ static void computeRange(
 
             double contribution = overlap_ratio * alpha * beta * dev.deltaT;
             if (debug >= 2) {
-                net->_mgr()->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
+                net->_mgr->debug("[SH]   dev[%d] overlap_ratio=%.6g alpha=%.6g beta=%.6g contrib=%.6g\n",
                            overlap[j], overlap_ratio, alpha, beta, contribution);
             }
 
@@ -574,7 +582,7 @@ static void computeRange(
         emParams[r]._deltaT = static_cast<float>(deltaT_total);
 
         if (debug >= 1) {
-            net->_mgr()->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
+            net->_mgr->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
                        r, deltaT_self, deltaT_feol, deltaT_total);
         }
     }
@@ -647,7 +655,7 @@ void SelfHeatingMgr::compute(
     //   Pass 2: For each mapped layer, lookup metal_layers map once
     int maxLayerIdx = -1;
     for (size_t i = 0; i < reses.size(); ++i) {
-        if (!reses[i]->isVia() && reses[i]->layerIdx() > maxLayerIdx)
+        if (!resIsVia(reses[i], _net->_mgr) && reses[i]->layerIdx() > maxLayerIdx)
             maxLayerIdx = reses[i]->layerIdx();
     }
     std::vector<const MetalLayerParams*> mlpTable(maxLayerIdx + 1, NULL);
@@ -655,7 +663,7 @@ void SelfHeatingMgr::compute(
         // Pass 1: collect layerIdx -> layer name (first occurrence wins)
         std::vector<const std::string*> idxToName(maxLayerIdx + 1, NULL);
         for (size_t i = 0; i < reses.size(); ++i) {
-            if (reses[i]->isVia()) continue;
+            if (resIsVia(reses[i], _net->_mgr)) continue;
             int lidx = reses[i]->layerIdx();
             if (lidx >= 0 && lidx <= maxLayerIdx && !idxToName[lidx]) {
                 idxToName[lidx] = &reses[i]->layer();

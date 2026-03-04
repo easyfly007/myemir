@@ -49,10 +49,6 @@ public:
     float rmsPower() const;
     void setRmsPower(float v);
 
-    // via or wire
-    bool isVia() const;
-    void setIsVia(bool v);
-
     // connected node indices (offsets into EmirNetInfo::_nodes)
     int n1() const;
     int n2() const;
@@ -68,7 +64,6 @@ private:
     float _current;
     float _avgPower;
     float _rmsPower;
-    bool _isVia;
 };
 
 #endif // EMIR_RES_INFO_H

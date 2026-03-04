@@ -10,7 +10,6 @@ EmirResInfo::EmirResInfo()
     , _layerIdx(-1)
     , _resistance(0.0f), _current(0.0f)
     , _avgPower(0.0f), _rmsPower(0.0f)
-    , _isVia(false)
 {}
 
 float EmirResInfo::llx() const { return _llx; }
@@ -34,9 +33,6 @@ float EmirResInfo::avgPower() const { return _avgPower; }
 void EmirResInfo::setAvgPower(float v) { _avgPower = v; }
 float EmirResInfo::rmsPower() const { return _rmsPower; }
 void EmirResInfo::setRmsPower(float v) { _rmsPower = v; }
-
-bool EmirResInfo::isVia() const { return _isVia; }
-void EmirResInfo::setIsVia(bool v) { _isVia = v; }
 
 int EmirResInfo::n1() const { return _n1; }
 int EmirResInfo::n2() const { return _n2; }
