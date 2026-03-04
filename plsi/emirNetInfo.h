@@ -24,8 +24,7 @@ public:
 
     const std::vector<EmirNodeInfo*>& nodes() const;
     const std::vector<EmirResInfo*>& reses() const;
-    std::vector<ResEmParam>& resEmParams();
-    const std::vector<ResEmParam>& resEmParams() const;
+    ResEmParam* getResEmParam(int residx);
 
     // res power (indexed by res offset, same as reses())
     float getResPwrAvg(int residx) const;

@@ -232,7 +232,7 @@ static void testMgrBuildViaConn() {
     // We can verify by running compute and checking alpha difference
     // For now we just verify it doesn't crash and the net has correct structure
     CHECK(net.reses().size() == 3);
-    CHECK(net.resEmParams().size() == 3);
+    CHECK(net.reses().size() == 3);
 }
 
 // =============================================================================
@@ -340,10 +340,8 @@ static void testMgrComputeEndToEnd() {
     mgr.compute(devMgr, params);
 
     // --- Verify ---
-    const std::vector<ResEmParam>& emParams = net.resEmParams();
-
     // via_res (index 0): skipped, deltaT should remain 0
-    CHECK_NEAR(emParams[0]._deltaT, 0.0f, 1e-6);
+    CHECK_NEAR(net.getResEmParam(0)->_deltaT, 0.0f, 1e-6);
 
     // wire_res_conn (index 1): connected -> alpha_connecting = 0.5
     // overlap_ratio = 1.0 (wire res and device have identical bbox)
@@ -355,7 +353,7 @@ static void testMgrComputeEndToEnd() {
     double deltaT_feol_conn = overlap_ratio_conn * m1.alpha_connecting * beta_conn * dev_deltaT;
     double deltaT_total_conn = (deltaT_self_conn + deltaT_feol_conn) * params.K_SH_Scale;
 
-    CHECK_NEAR(emParams[1]._deltaT, deltaT_total_conn, 0.01);
+    CHECK_NEAR(net.getResEmParam(1)->_deltaT, deltaT_total_conn, 0.01);
 
     // wire_res_noconn (index 2): not connected -> alpha_overlapping = 0.3
     // overlap_ratio = 1.0 (wire res and device have identical bbox)
@@ -367,15 +365,15 @@ static void testMgrComputeEndToEnd() {
     double deltaT_feol_noconn = overlap_ratio_noconn * m1.alpha_overlapping * beta_noconn * dev_deltaT;
     double deltaT_total_noconn = (deltaT_self_noconn + deltaT_feol_noconn) * params.K_SH_Scale;
 
-    CHECK_NEAR(emParams[2]._deltaT, deltaT_total_noconn, 0.01);
+    CHECK_NEAR(net.getResEmParam(2)->_deltaT, deltaT_total_noconn, 0.01);
 
     // Connected should have higher deltaT than non-connected (alpha_connecting > alpha_overlapping)
-    CHECK(emParams[1]._deltaT > emParams[2]._deltaT);
+    CHECK(net.getResEmParam(1)->_deltaT > net.getResEmParam(2)->_deltaT);
 
     fprintf(stdout, "  wire_res_conn  deltaT = %f (expected %f)\n",
-            emParams[1]._deltaT, deltaT_total_conn);
+            net.getResEmParam(1)->_deltaT, deltaT_total_conn);
     fprintf(stdout, "  wire_res_noconn deltaT = %f (expected %f)\n",
-            emParams[2]._deltaT, deltaT_total_noconn);
+            net.getResEmParam(2)->_deltaT, deltaT_total_noconn);
 }
 
 // =============================================================================
@@ -448,8 +446,6 @@ static void testMgrComputePartialOverlap() {
     mgr.buildViaConn();
     mgr.compute(devMgr, params);
 
-    const std::vector<ResEmParam>& emParams = net.resEmParams();
-
     double overlap_ratio = 50.0 / 150.0;  // 1/3
     double beta = params.beta_c1 * dev_deltaT
                 + params.beta_c2 * rms_power
@@ -458,7 +454,7 @@ static void testMgrComputePartialOverlap() {
     double deltaT_feol = overlap_ratio * m1.alpha_overlapping * beta * dev_deltaT;
     double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
 
-    CHECK_NEAR(emParams[0]._deltaT, deltaT_total, 0.01);
+    CHECK_NEAR(net.getResEmParam(0)->_deltaT, deltaT_total, 0.01);
 
     // Verify overlap_ratio < 1.0 actually reduces FEOL contribution vs full overlap
     double deltaT_feol_full = 1.0 * m1.alpha_overlapping * beta * dev_deltaT;
@@ -466,7 +462,7 @@ static void testMgrComputePartialOverlap() {
 
     fprintf(stdout, "  overlap_ratio = %f\n", overlap_ratio);
     fprintf(stdout, "  deltaT = %f (expected %f)\n",
-            emParams[0]._deltaT, deltaT_total);
+            net.getResEmParam(0)->_deltaT, deltaT_total);
     fprintf(stdout, "  deltaT_feol partial = %f vs full = %f\n",
             deltaT_feol, deltaT_feol_full);
 }
@@ -498,7 +494,7 @@ static void testEmptyInput() {
 
     SelfHeatingParams params;
     mgr.compute(devMgr, params);
-    CHECK(net.resEmParams().size() == 0);
+    CHECK(net.reses().size() == 0);
 }
 
 // =============================================================================
@@ -555,7 +551,7 @@ static void testMissingMetalLayer() {
     mgr.compute(devMgr, params);
 
     // deltaT should remain 0 since M2 is not in metal_layers
-    CHECK_NEAR(net.resEmParams()[0]._deltaT, 0.0f, 1e-6);
+    CHECK_NEAR(net.getResEmParam(0)->_deltaT, 0.0f, 1e-6);
 }
 
 // =============================================================================
@@ -656,9 +652,7 @@ static void testMgrComputeMultiThread() {
     mgr.compute(devMgr, params);
 
     // --- Verify (same expected values as end-to-end) ---
-    const std::vector<ResEmParam>& emParams = net.resEmParams();
-
-    CHECK_NEAR(emParams[0]._deltaT, 0.0f, 1e-6);
+    CHECK_NEAR(net.getResEmParam(0)->_deltaT, 0.0f, 1e-6);
 
     double overlap_ratio_conn = 1.0;
     double beta_conn = params.beta_c1 * dev_deltaT
@@ -668,7 +662,7 @@ static void testMgrComputeMultiThread() {
     double deltaT_feol_conn = overlap_ratio_conn * m1.alpha_connecting * beta_conn * dev_deltaT;
     double deltaT_total_conn = (deltaT_self_conn + deltaT_feol_conn) * params.K_SH_Scale;
 
-    CHECK_NEAR(emParams[1]._deltaT, deltaT_total_conn, 0.01);
+    CHECK_NEAR(net.getResEmParam(1)->_deltaT, deltaT_total_conn, 0.01);
 
     double overlap_ratio_noconn = 1.0;
     double beta_noconn = params.beta_c1 * dev_deltaT
@@ -678,14 +672,14 @@ static void testMgrComputeMultiThread() {
     double deltaT_feol_noconn = overlap_ratio_noconn * m1.alpha_overlapping * beta_noconn * dev_deltaT;
     double deltaT_total_noconn = (deltaT_self_noconn + deltaT_feol_noconn) * params.K_SH_Scale;
 
-    CHECK_NEAR(emParams[2]._deltaT, deltaT_total_noconn, 0.01);
+    CHECK_NEAR(net.getResEmParam(2)->_deltaT, deltaT_total_noconn, 0.01);
 
-    CHECK(emParams[1]._deltaT > emParams[2]._deltaT);
+    CHECK(net.getResEmParam(1)->_deltaT > net.getResEmParam(2)->_deltaT);
 
     fprintf(stdout, "  [MT] wire_res_conn  deltaT = %f (expected %f)\n",
-            emParams[1]._deltaT, deltaT_total_conn);
+            net.getResEmParam(1)->_deltaT, deltaT_total_conn);
     fprintf(stdout, "  [MT] wire_res_noconn deltaT = %f (expected %f)\n",
-            emParams[2]._deltaT, deltaT_total_noconn);
+            net.getResEmParam(2)->_deltaT, deltaT_total_noconn);
 }
 
 // =============================================================================

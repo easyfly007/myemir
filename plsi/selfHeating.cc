@@ -506,7 +506,6 @@ void SelfHeatingMgr::buildViaConn() {
 static void computeRange(
     size_t begin, size_t end,
     const std::vector<EmirResInfo*>& reses,
-    std::vector<ResEmParam>& emParams,
     const SelfHeatingDevMgr& devMgr,
     const SelfHeatingParams& params,
     const std::vector<const MetalLayerParams*>& mlpTable,
@@ -580,7 +579,7 @@ static void computeRange(
         }
 
         double deltaT_total = (deltaT_self + deltaT_feol) * K_SH_Scale;
-        emParams[r]._deltaT = static_cast<float>(deltaT_total);
+        net->getResEmParam(static_cast<int>(r))->_deltaT = static_cast<float>(deltaT_total);
 
         if (debug >= 1) {
             net->_mgr->debug("[SH] res[%zu] deltaT_self=%.6g deltaT_feol=%.6g deltaT_total=%.6g\n",
@@ -599,7 +598,6 @@ struct SHComputeJob {
 
 struct SHComputeArg : public EmirMtmqArg {
     const std::vector<EmirResInfo*>* reses;
-    std::vector<ResEmParam>* emParams;
     const SelfHeatingDevMgr* devMgr;
     const SelfHeatingParams* params;
     const std::vector<const MetalLayerParams*>* mlpTable;
@@ -615,7 +613,7 @@ public:
         SHComputeJob* j = static_cast<SHComputeJob*>(job);
         SHComputeArg* a = static_cast<SHComputeArg*>(arg);
         computeRange(j->begin, j->end,
-                     *a->reses, *a->emParams, *a->devMgr, *a->params,
+                     *a->reses, *a->devMgr, *a->params,
                      *a->mlpTable, *a->isConnected, a->debug, a->net);
     }
 };
@@ -643,7 +641,6 @@ void SelfHeatingMgr::compute(
     const SelfHeatingParams& params)
 {
     const std::vector<EmirResInfo*>& reses = _net->reses();
-    std::vector<ResEmParam>& emParams = _net->resEmParams();
 
     if (reses.empty()) return;
 
@@ -683,7 +680,7 @@ void SelfHeatingMgr::compute(
 
     if (_numThreads <= 1) {
         // Single-threaded path
-        computeRange(0, reses.size(), reses, emParams, devMgr, params,
+        computeRange(0, reses.size(), reses, devMgr, params,
                      mlpTable, _isConnected, _debug, _net);
     } else {
         // Multi-threaded path via mtmq
@@ -700,7 +697,6 @@ void SelfHeatingMgr::compute(
 
         SHComputeArg arg;
         arg.reses = &reses;
-        arg.emParams = &emParams;
         arg.devMgr = &devMgr;
         arg.params = &params;
         arg.mlpTable = &mlpTable;

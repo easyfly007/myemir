@@ -13,8 +13,7 @@ EmirNetInfo::~EmirNetInfo()
 
 const std::vector<EmirNodeInfo*>& EmirNetInfo::nodes() const { return _nodes; }
 const std::vector<EmirResInfo*>& EmirNetInfo::reses() const { return _reses; }
-std::vector<ResEmParam>& EmirNetInfo::resEmParams() { return _resEmParams; }
-const std::vector<ResEmParam>& EmirNetInfo::resEmParams() const { return _resEmParams; }
+ResEmParam* EmirNetInfo::getResEmParam(int residx) { return &_resEmParams[residx]; }
 
 void EmirNetInfo::addNode(EmirNodeInfo* n) {
     n->setIdx(static_cast<int>(_nodes.size()));
