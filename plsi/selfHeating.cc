@@ -13,6 +13,7 @@
 #include <cstdio>
 #include <ctime>
 
+#include "emirInfoMgr.h"
 #include "emirMtmqMgr.h"
 #include "emirMtmqTask.h"
 #include "emirMtmqArg.h"
