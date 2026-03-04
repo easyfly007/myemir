@@ -531,7 +531,7 @@ static void computeRange(
         if (lidx < 0 || lidx >= static_cast<int>(mlpTable.size()) || !mlpTable[lidx]) continue;
         const MetalLayerParams& mlp = *mlpTable[lidx];
 
-        double deltaT_self = mlp.Rth * res->avgPower();
+        double deltaT_self = mlp.Rth * net->getResPwrAvg(static_cast<int>(r));
 
         double deltaT_feol = 0.0;
 
@@ -552,7 +552,7 @@ static void computeRange(
         double alpha = isConnected[r]
                        ? mlp.alpha_connecting
                        : mlp.alpha_overlapping;
-        double rms_power = res->rmsPower();
+        double rms_power = net->getResPwrRms(static_cast<int>(r));
         double beta_c2_rms = beta_c2 * rms_power;
 
         for (int j = 0; j < static_cast<int>(overlap.size()); ++j) {

@@ -44,10 +44,6 @@ public:
     void setResistance(float v);
     float current() const;
     void setCurrent(float v);
-    float avgPower() const;
-    void setAvgPower(float v);
-    float rmsPower() const;
-    void setRmsPower(float v);
 
     // connected node indices (offsets into EmirNetInfo::_nodes)
     int n1() const;
@@ -62,8 +58,6 @@ private:
     int _layerIdx;
     float _resistance;
     float _current;
-    float _avgPower;
-    float _rmsPower;
 };
 
 #endif // EMIR_RES_INFO_H

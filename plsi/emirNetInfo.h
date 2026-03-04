@@ -27,9 +27,13 @@ public:
     std::vector<ResEmParam>& resEmParams();
     const std::vector<ResEmParam>& resEmParams() const;
 
+    // res power (indexed by res offset, same as reses())
+    float getResPwrAvg(int residx) const;
+    float getResPwrRms(int residx) const;
+
     // building helpers
     void addNode(EmirNodeInfo* n);
-    void addRes(EmirResInfo* r);
+    void addRes(EmirResInfo* r, float pwrAvg = 0.0f, float pwrRms = 0.0f);
 
     EmirInfoMgr* _mgr;  // parent manager
 
@@ -37,6 +41,8 @@ private:
     std::vector<EmirNodeInfo*> _nodes;
     std::vector<EmirResInfo*> _reses;
     std::vector<ResEmParam> _resEmParams;  // same offset as _reses
+    std::vector<float> _resPwrAvg;         // same offset as _reses
+    std::vector<float> _resPwrRms;         // same offset as _reses
 };
 
 #endif // EMIR_NET_INFO_H

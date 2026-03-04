@@ -211,8 +211,7 @@ static void testMgrBuildViaConn() {
     wire_res_0.setLayer("M1");
     wire_res_0.setLayerIdx(0);
     wire_res_0.setBBox(0, 0, 10, 10);
-    wire_res_0.setAvgPower(0.01f);
-    wire_res_0.setRmsPower(0.02f);
+
 
     // wire_res_1: node_other -> node_far (not connected)
     EmirResInfo wire_res_1;
@@ -221,12 +220,9 @@ static void testMgrBuildViaConn() {
     wire_res_1.setLayer("M1");
     wire_res_1.setLayerIdx(0);
     wire_res_1.setBBox(50, 50, 60, 60);
-    wire_res_1.setAvgPower(0.01f);
-    wire_res_1.setRmsPower(0.02f);
-
     net.addRes(&via_res);
-    net.addRes(&wire_res_0);
-    net.addRes(&wire_res_1);
+    net.addRes(&wire_res_0, 0.01f, 0.02f);
+    net.addRes(&wire_res_1, 0.01f, 0.02f);
 
     SelfHeatingMgr mgr(&net);
     mgr.buildViaConn();
@@ -325,8 +321,6 @@ static void testMgrComputeEndToEnd() {
     wire_res_conn.setLayer("M1");
     wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
-    wire_res_conn.setAvgPower(avg_power);
-    wire_res_conn.setRmsPower(rms_power);
 
     // wire_res_noconn: not connected -> alpha_overlapping
     EmirResInfo wire_res_noconn;
@@ -335,12 +329,10 @@ static void testMgrComputeEndToEnd() {
     wire_res_noconn.setLayer("M1");
     wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
-    wire_res_noconn.setAvgPower(avg_power);
-    wire_res_noconn.setRmsPower(rms_power);
 
-    net.addRes(&via_res);         // index 0
-    net.addRes(&wire_res_conn);   // index 1
-    net.addRes(&wire_res_noconn); // index 2
+    net.addRes(&via_res);                              // index 0
+    net.addRes(&wire_res_conn,    avg_power, rms_power); // index 1
+    net.addRes(&wire_res_noconn, avg_power, rms_power); // index 2
 
     // --- Run ---
     SelfHeatingMgr mgr(&net);
@@ -450,10 +442,7 @@ static void testMgrComputePartialOverlap() {
     wire_res.setBBox(5, 0, 20, 10);
     float avg_power = 0.01f;
     float rms_power = 0.02f;
-    wire_res.setAvgPower(avg_power);
-    wire_res.setRmsPower(rms_power);
-
-    net.addRes(&wire_res);
+    net.addRes(&wire_res, avg_power, rms_power);
 
     SelfHeatingMgr mgr(&net);
     mgr.buildViaConn();
@@ -559,10 +548,7 @@ static void testMissingMetalLayer() {
     wire_res.setLayer("M2");  // not in params
     wire_res.setLayerIdx(1);
     wire_res.setBBox(0, 0, 10, 10);
-    wire_res.setAvgPower(0.01f);
-    wire_res.setRmsPower(0.02f);
-
-    net.addRes(&wire_res);
+    net.addRes(&wire_res, 0.01f, 0.02f);
 
     SelfHeatingMgr mgr(&net);
     mgr.buildViaConn();
@@ -652,8 +638,6 @@ static void testMgrComputeMultiThread() {
     wire_res_conn.setLayer("M1");
     wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
-    wire_res_conn.setAvgPower(avg_power);
-    wire_res_conn.setRmsPower(rms_power);
 
     EmirResInfo wire_res_noconn;
     wire_res_noconn._n1 = node_other.idx();
@@ -661,12 +645,10 @@ static void testMgrComputeMultiThread() {
     wire_res_noconn.setLayer("M1");
     wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
-    wire_res_noconn.setAvgPower(avg_power);
-    wire_res_noconn.setRmsPower(rms_power);
 
     net.addRes(&via_res);
-    net.addRes(&wire_res_conn);
-    net.addRes(&wire_res_noconn);
+    net.addRes(&wire_res_conn,    avg_power, rms_power);
+    net.addRes(&wire_res_noconn, avg_power, rms_power);
 
     // --- Run with numThreads=2 ---
     SelfHeatingMgr mgr(&net, 0, 2);

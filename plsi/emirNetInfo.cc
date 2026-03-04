@@ -21,7 +21,12 @@ void EmirNetInfo::addNode(EmirNodeInfo* n) {
     _nodes.push_back(n);
 }
 
-void EmirNetInfo::addRes(EmirResInfo* r) {
+float EmirNetInfo::getResPwrAvg(int residx) const { return _resPwrAvg[residx]; }
+float EmirNetInfo::getResPwrRms(int residx) const { return _resPwrRms[residx]; }
+
+void EmirNetInfo::addRes(EmirResInfo* r, float pwrAvg, float pwrRms) {
     _reses.push_back(r);
-    _resEmParams.push_back(ResEmParam());  // keep same offset
+    _resEmParams.push_back(ResEmParam());
+    _resPwrAvg.push_back(pwrAvg);
+    _resPwrRms.push_back(pwrRms);
 }
