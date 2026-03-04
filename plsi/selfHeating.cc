@@ -530,7 +530,7 @@ static void computeRange(
         if (lidx < 0 || lidx >= static_cast<int>(mlpTable.size()) || !mlpTable[lidx]) continue;
         const MetalLayerParams& mlp = *mlpTable[lidx];
 
-        double deltaT_self = mlp.Rth * net->getResPwrAvg(static_cast<int>(r));
+        double deltaT_self = mlp.Rth * net->getResPwrRms(static_cast<int>(r));
 
         double deltaT_feol = 0.0;
 
@@ -623,7 +623,7 @@ public:
 // Compute deltaT for each wire res in this net and write to ResEmParam._deltaT.
 //
 // For each wire res:
-//   1. deltaT_self = Rth(wire_layer) * avgPower  (self joule heating)
+//   1. deltaT_self = Rth(wire_layer) * rmsPower  (self joule heating)
 //   2. deltaT_feol = sum over overlapping devices of:
 //        alpha * beta * device_deltaT
 //      where:

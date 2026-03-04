@@ -349,7 +349,7 @@ static void testMgrComputeEndToEnd() {
     double beta_conn = params.beta_c1 * dev_deltaT
                      + params.beta_c2 * rms_power
                      + params.beta_c3;
-    double deltaT_self_conn = m1.Rth * avg_power;
+    double deltaT_self_conn = m1.Rth * rms_power;
     double deltaT_feol_conn = overlap_ratio_conn * m1.alpha_connecting * beta_conn * dev_deltaT;
     double deltaT_total_conn = (deltaT_self_conn + deltaT_feol_conn) * params.K_SH_Scale;
 
@@ -361,7 +361,7 @@ static void testMgrComputeEndToEnd() {
     double beta_noconn = params.beta_c1 * dev_deltaT
                        + params.beta_c2 * rms_power
                        + params.beta_c3;
-    double deltaT_self_noconn = m1.Rth * avg_power;
+    double deltaT_self_noconn = m1.Rth * rms_power;
     double deltaT_feol_noconn = overlap_ratio_noconn * m1.alpha_overlapping * beta_noconn * dev_deltaT;
     double deltaT_total_noconn = (deltaT_self_noconn + deltaT_feol_noconn) * params.K_SH_Scale;
 
@@ -450,7 +450,7 @@ static void testMgrComputePartialOverlap() {
     double beta = params.beta_c1 * dev_deltaT
                 + params.beta_c2 * rms_power
                 + params.beta_c3;
-    double deltaT_self = m1.Rth * avg_power;
+    double deltaT_self = m1.Rth * rms_power;
     double deltaT_feol = overlap_ratio * m1.alpha_overlapping * beta * dev_deltaT;
     double deltaT_total = (deltaT_self + deltaT_feol) * params.K_SH_Scale;
 
@@ -658,7 +658,7 @@ static void testMgrComputeMultiThread() {
     double beta_conn = params.beta_c1 * dev_deltaT
                      + params.beta_c2 * rms_power
                      + params.beta_c3;
-    double deltaT_self_conn = m1.Rth * avg_power;
+    double deltaT_self_conn = m1.Rth * rms_power;
     double deltaT_feol_conn = overlap_ratio_conn * m1.alpha_connecting * beta_conn * dev_deltaT;
     double deltaT_total_conn = (deltaT_self_conn + deltaT_feol_conn) * params.K_SH_Scale;
 
@@ -668,7 +668,7 @@ static void testMgrComputeMultiThread() {
     double beta_noconn = params.beta_c1 * dev_deltaT
                        + params.beta_c2 * rms_power
                        + params.beta_c3;
-    double deltaT_self_noconn = m1.Rth * avg_power;
+    double deltaT_self_noconn = m1.Rth * rms_power;
     double deltaT_feol_noconn = overlap_ratio_noconn * m1.alpha_overlapping * beta_noconn * dev_deltaT;
     double deltaT_total_noconn = (deltaT_self_noconn + deltaT_feol_noconn) * params.K_SH_Scale;
 
