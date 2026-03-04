@@ -1,7 +1,6 @@
 #ifndef EMIR_RES_INFO_H
 #define EMIR_RES_INFO_H
 
-#include <string>
 #include <limits>
 
 // =============================================================================
@@ -34,8 +33,6 @@ public:
     void setBBox(float llx, float lly, float urx, float ury);
 
     // layer
-    const std::string& layer() const;
-    void setLayer(const std::string& l);
     int layerIdx() const;
     void setLayerIdx(int idx);
 
@@ -54,7 +51,6 @@ public:
 
 private:
     float _llx, _lly, _urx, _ury;
-    std::string _layer;
     int _layerIdx;
     float _resistance;
     float _current;

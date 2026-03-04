@@ -19,8 +19,6 @@ void EmirResInfo::setBBox(float llx, float lly, float urx, float ury) {
     _llx = llx; _lly = lly; _urx = urx; _ury = ury;
 }
 
-const std::string& EmirResInfo::layer() const { return _layer; }
-void EmirResInfo::setLayer(const std::string& l) { _layer = l; }
 int EmirResInfo::layerIdx() const { return _layerIdx; }
 void EmirResInfo::setLayerIdx(int idx) { _layerIdx = idx; }
 

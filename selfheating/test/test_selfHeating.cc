@@ -200,7 +200,6 @@ static void testMgrBuildViaConn() {
     EmirResInfo via_res;
     via_res._n1 = node_inst.idx();
     via_res._n2 = node_mid.idx();
-    via_res.setLayer("VIA1");
     via_res.setLayerIdx(1);
     via_res.setBBox(0, 0, 5, 5);
 
@@ -208,7 +207,6 @@ static void testMgrBuildViaConn() {
     EmirResInfo wire_res_0;
     wire_res_0._n1 = node_mid.idx();
     wire_res_0._n2 = node_end.idx();
-    wire_res_0.setLayer("M1");
     wire_res_0.setLayerIdx(0);
     wire_res_0.setBBox(0, 0, 10, 10);
 
@@ -217,7 +215,6 @@ static void testMgrBuildViaConn() {
     EmirResInfo wire_res_1;
     wire_res_1._n1 = node_other.idx();
     wire_res_1._n2 = node_far.idx();
-    wire_res_1.setLayer("M1");
     wire_res_1.setLayerIdx(0);
     wire_res_1.setBBox(50, 50, 60, 60);
     net.addRes(&via_res);
@@ -292,8 +289,9 @@ static void testMgrComputeEndToEnd() {
     node_far.setType('N');   node_far.setX(8);   node_far.setY(8);
 
     EmirInfoMgr infoMgr;
-    EmirLayerInfo via_layer(1, "VIA1");
-    via_layer._type = 1;
+    EmirLayerInfo m1_layer(0, "M1");  m1_layer._type = 0;
+    EmirLayerInfo via_layer(1, "VIA1"); via_layer._type = 1;
+    infoMgr.addLayer(&m1_layer);
     infoMgr.addLayer(&via_layer);
 
     EmirNetInfo net;
@@ -307,7 +305,6 @@ static void testMgrComputeEndToEnd() {
     EmirResInfo via_res;
     via_res._n1 = node_inst.idx();
     via_res._n2 = node_mid.idx();
-    via_res.setLayer("VIA1");
     via_res.setLayerIdx(1);
     via_res.setBBox(0, 0, 5, 5);
 
@@ -318,7 +315,6 @@ static void testMgrComputeEndToEnd() {
     EmirResInfo wire_res_conn;
     wire_res_conn._n1 = node_mid.idx();
     wire_res_conn._n2 = node_end.idx();
-    wire_res_conn.setLayer("M1");
     wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
 
@@ -326,7 +322,6 @@ static void testMgrComputeEndToEnd() {
     EmirResInfo wire_res_noconn;
     wire_res_noconn._n1 = node_other.idx();
     wire_res_noconn._n2 = node_far.idx();
-    wire_res_noconn.setLayer("M1");
     wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
 
@@ -427,6 +422,8 @@ static void testMgrComputePartialOverlap() {
     n2.setType('N'); n2.setX(20); n2.setY(10);
 
     EmirInfoMgr infoMgr;
+    EmirLayerInfo m1_layer(0, "M1");  m1_layer._type = 0;
+    infoMgr.addLayer(&m1_layer);
     EmirNetInfo net;
     net._mgr = &infoMgr;
     net.addNode(&n1);  // idx 0
@@ -435,7 +432,6 @@ static void testMgrComputePartialOverlap() {
     EmirResInfo wire_res;
     wire_res._n1 = n1.idx();
     wire_res._n2 = n2.idx();
-    wire_res.setLayer("M1");
     wire_res.setLayerIdx(0);
     wire_res.setBBox(5, 0, 20, 10);
     float avg_power = 0.01f;
@@ -541,7 +537,6 @@ static void testMissingMetalLayer() {
     EmirResInfo wire_res;
     wire_res._n1 = n1.idx();
     wire_res._n2 = n2.idx();
-    wire_res.setLayer("M2");  // not in params
     wire_res.setLayerIdx(1);
     wire_res.setBBox(0, 0, 10, 10);
     net.addRes(&wire_res, 0.01f, 0.02f);
@@ -606,8 +601,9 @@ static void testMgrComputeMultiThread() {
     node_far.setType('N');   node_far.setX(8);   node_far.setY(8);
 
     EmirInfoMgr infoMgr;
-    EmirLayerInfo via_layer(1, "VIA1");
-    via_layer._type = 1;
+    EmirLayerInfo m1_layer(0, "M1");  m1_layer._type = 0;
+    EmirLayerInfo via_layer(1, "VIA1"); via_layer._type = 1;
+    infoMgr.addLayer(&m1_layer);
     infoMgr.addLayer(&via_layer);
 
     EmirNetInfo net;
@@ -621,7 +617,6 @@ static void testMgrComputeMultiThread() {
     EmirResInfo via_res;
     via_res._n1 = node_inst.idx();
     via_res._n2 = node_mid.idx();
-    via_res.setLayer("VIA1");
     via_res.setLayerIdx(1);
     via_res.setBBox(0, 0, 5, 5);
 
@@ -631,14 +626,12 @@ static void testMgrComputeMultiThread() {
     EmirResInfo wire_res_conn;
     wire_res_conn._n1 = node_mid.idx();
     wire_res_conn._n2 = node_end.idx();
-    wire_res_conn.setLayer("M1");
     wire_res_conn.setLayerIdx(0);
     wire_res_conn.setBBox(0, 0, 10, 10);
 
     EmirResInfo wire_res_noconn;
     wire_res_noconn._n1 = node_other.idx();
     wire_res_noconn._n2 = node_far.idx();
-    wire_res_noconn.setLayer("M1");
     wire_res_noconn.setLayerIdx(0);
     wire_res_noconn.setBBox(0, 0, 10, 10);
 

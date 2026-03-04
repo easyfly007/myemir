@@ -539,8 +539,11 @@ static void computeRange(
         if (res_area <= 0.0) continue;
 
         if (debug >= 2) {
+            const std::vector<EmirLayerInfo*>& dbgLayers = net->_mgr->layers();
+            const char* layerName = (lidx >= 0 && lidx < static_cast<int>(dbgLayers.size()) && dbgLayers[lidx])
+                                    ? dbgLayers[lidx]->name().c_str() : "?";
             net->_mgr->debug("[SH] res[%zu] layer=%s bbox=(%.4f,%.4f)-(%.4f,%.4f) area=%.6g\n",
-                       r, res->layer().c_str(),
+                       r, layerName,
                        res->llx(), res->lly(), res->urx(), res->ury(), res_area);
         }
 
@@ -656,16 +659,15 @@ void SelfHeatingMgr::compute(
         if (!resIsVia(reses[i], _net->_mgr) && reses[i]->layerIdx() > maxLayerIdx)
             maxLayerIdx = reses[i]->layerIdx();
     }
+    const std::vector<EmirLayerInfo*>& layerTable = _net->_mgr->layers();
+    const int nLayers = static_cast<int>(layerTable.size());
     std::vector<const MetalLayerParams*> mlpTable(maxLayerIdx + 1, NULL);
     {
-        // Pass 1: collect layerIdx -> layer name (first occurrence wins)
+        // Pass 1: collect layerIdx -> layer name via EmirLayerInfo
         std::vector<const std::string*> idxToName(maxLayerIdx + 1, NULL);
-        for (size_t i = 0; i < reses.size(); ++i) {
-            if (resIsVia(reses[i], _net->_mgr)) continue;
-            int lidx = reses[i]->layerIdx();
-            if (lidx >= 0 && lidx <= maxLayerIdx && !idxToName[lidx]) {
-                idxToName[lidx] = &reses[i]->layer();
-            }
+        for (int lidx = 0; lidx <= maxLayerIdx; ++lidx) {
+            if (lidx < nLayers && layerTable[lidx])
+                idxToName[lidx] = &layerTable[lidx]->name();
         }
         // Pass 2: lookup metal_layers map for each distinct layerIdx
         for (int lidx = 0; lidx <= maxLayerIdx; ++lidx) {
